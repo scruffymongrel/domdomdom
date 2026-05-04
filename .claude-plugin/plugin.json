@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "domdomdom",
+  "description": "DOM-aware JS evaluator. Pipe code via stdin to run against any HTML page (URL, local file, or inline). Auto-loaded skill teaches Claude when and how to use it instead of reaching for Playwright.",
+  "version": "0.1.0",
+  "author": {
+    "name": "scruffymongrel"
+  },
+  "homepage": "https://github.com/scruffymongrel/domdomdom",
+  "repository": "https://github.com/scruffymongrel/domdomdom",
+  "license": "MIT",
+  "keywords": [
+    "dom",
+    "happy-dom",
+    "html",
+    "evaluation",
+    "scraping",
+    "testing"
+  ]
+}

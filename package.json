@@ -1,0 +1,31 @@
+{
+  "name": "domdomdom",
+  "type": "module",
+  "main": "./index.ts",
+  "module": "./index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "bin": {
+    "domdomdom": "./cli.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "quality": "tsc --noEmit && bun test"
+  },
+  "engines": {
+    "node": ">=23.6",
+    "bun": ">=1.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^25.6.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "happy-dom": "^20.9.0"
+  }
+}

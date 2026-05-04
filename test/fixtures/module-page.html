@@ -1,0 +1,6 @@
+<!doctype html>
+<title>module page</title>
+<script type="module">
+  import { greeting, double } from './module-lib.js'
+  window.modOutput = { greeting, doubled: double(21) }
+</script>

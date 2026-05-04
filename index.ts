@@ -84,13 +84,26 @@ function extractLocalScripts(
 // JSON, parseInt, etc.) set to undefined. happy-dom's VMGlobalPropertyScript is
 // meant to copy them from globalThis, but inside Script.runInContext globalThis
 // refers to the (empty) inner scope. Copy them from the host realm explicitly.
+//
+// Snapshot the host built-ins at module-load time rather than reading
+// globalThis on every call: in a long-lived process (e.g. a bun test run) other
+// code can mutate global state between evaluate() calls — we observed
+// Error.prototype.message picking up an empty default after unrelated tests,
+// which then propagated into pages and stripped error messages.
+const HOST_BUILTINS: Record<string, unknown> = (() => {
+  const snap: Record<string, unknown> = {}
+  for (const name of Object.getOwnPropertyNames(globalThis)) {
+    snap[name] = (globalThis as unknown as Record<string, unknown>)[name]
+  }
+  return snap
+})()
+
 function patchBuiltins(window: object): void {
   const win = window as Record<string, unknown>
-  const host = globalThis as unknown as Record<string, unknown>
-  for (const name of Object.getOwnPropertyNames(globalThis)) {
+  for (const name in HOST_BUILTINS) {
     if (win[name] !== undefined) continue
     try {
-      win[name] = host[name]
+      win[name] = HOST_BUILTINS[name]
     } catch {
       /* read-only, ignore */
     }

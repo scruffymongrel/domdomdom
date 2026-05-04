@@ -1,6 +1,7 @@
 #!/usr/bin/env -S node --no-warnings=ExperimentalWarning
 import { parseArgs } from 'node:util'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { evaluate, toCloneable, type EvaluateOptions, type EvaluateResult } from './index.ts'
 
 const HELP = `domdomdom — evaluate JS against an HTML page (powered by happy-dom)
@@ -53,6 +54,15 @@ interface Args {
   timeout: number
   quietConsole: boolean
   json: boolean
+  help: boolean
+}
+
+/** Streams the CLI uses for I/O. Injected so tests can drive runCli() in-process. */
+export interface CliIO {
+  argv: string[]
+  stdin: AsyncIterable<Buffer | Uint8Array | string>
+  stdout: { write(s: string): unknown }
+  stderr: { write(s: string): unknown }
 }
 
 function parseViewport(s: string): { width: number; height: number } {
@@ -79,10 +89,6 @@ function parseCli(argv: string[]): Args {
       json: { type: 'boolean' },
     },
   })
-  if (values.help) {
-    process.stdout.write(HELP)
-    process.exit(0)
-  }
   return {
     positional: positionals[0],
     html: values.html,
@@ -94,20 +100,22 @@ function parseCli(argv: string[]): Args {
     timeout: values.timeout != null ? Number(values.timeout) : 5000,
     quietConsole: !!values['no-console'],
     json: !!values.json,
+    help: !!values.help,
   }
 }
 
-async function readStdin(): Promise<string> {
-  // Cross-runtime: process.stdin.[Symbol.asyncIterator] works in both Node and Bun.
-  const chunks: Buffer[] = []
-  for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
-  return Buffer.concat(chunks).toString('utf8')
+async function readAll(stream: AsyncIterable<Buffer | Uint8Array | string>): Promise<string> {
+  const parts: string[] = []
+  for await (const chunk of stream) {
+    parts.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'))
+  }
+  return parts.join('')
 }
 
 // Auto-return: try parsing the user's code as an expression first. If that
 // works, wrap it so its value flows back to the caller. Otherwise treat it as
 // a statement block (user must `return` themselves). Cheaper and more robust
-// than regex sniffing — caught e.g. template literals containing newlines.
+// than regex sniffing — catches e.g. template literals containing newlines.
 function wrapForReturn(code: string): string {
   const trimmed = code.trim()
   if (!trimmed) return ''
@@ -121,37 +129,36 @@ function wrapForReturn(code: string): string {
 
 function safeStringify(value: unknown): string {
   if (typeof value === 'string') return value
-  const cloned = toCloneable(value)
-  return JSON.stringify(cloned, null, 2)
+  return JSON.stringify(toCloneable(value), null, 2)
 }
 
-function emitHuman(result: EvaluateResult): number {
+function emitHuman(result: EvaluateResult, io: CliIO): number {
   for (const { level, message } of result.logs) {
-    process.stderr.write(`[${level}] ${message}\n`)
+    io.stderr.write(`[${level}] ${message}\n`)
   }
   if (!result.ok) {
     const e = result.error
     if (e.kind === 'timeout') {
-      process.stderr.write(`TIMEOUT: ${e.message}\n`)
+      io.stderr.write(`TIMEOUT: ${e.message}\n`)
       return 2
     }
     if (e.kind === 'setup') {
-      process.stderr.write(`SETUP ERROR: ${e.message}\n${e.stack ?? ''}\n`)
+      io.stderr.write(`SETUP ERROR: ${e.message}\n${e.stack ?? ''}\n`)
       return 3
     }
-    process.stderr.write(`EVAL ERROR: ${e.stack ?? e.message}\n`)
+    io.stderr.write(`EVAL ERROR: ${e.stack ?? e.message}\n`)
     return 1
   }
-  if (result.result === undefined) process.stdout.write('undefined\n')
-  else process.stdout.write(safeStringify(result.result) + '\n')
+  if (result.result === undefined) io.stdout.write('undefined\n')
+  else io.stdout.write(safeStringify(result.result) + '\n')
   return 0
 }
 
-function emitJson(result: EvaluateResult): number {
+function emitJson(result: EvaluateResult, io: CliIO): number {
   const payload = result.ok
     ? { ok: true, result: toCloneable(result.result), logs: result.logs }
     : { ok: false, error: result.error, logs: result.logs }
-  process.stdout.write(JSON.stringify(payload) + '\n')
+  io.stdout.write(JSON.stringify(payload) + '\n')
   if (!result.ok) {
     if (result.error.kind === 'timeout') return 2
     if (result.error.kind === 'setup') return 3
@@ -160,26 +167,35 @@ function emitJson(result: EvaluateResult): number {
   return 0
 }
 
-async function main(): Promise<number> {
+/**
+ * Run the CLI with the given I/O. Returns the exit code instead of calling
+ * process.exit, so tests can drive it in-process.
+ */
+export async function runCli(io: CliIO): Promise<number> {
   let args: Args
   try {
-    args = parseCli(process.argv.slice(2))
+    args = parseCli(io.argv)
   } catch (e) {
-    process.stderr.write(`USAGE: ${(e as Error).message}\n\n${HELP}`)
+    io.stderr.write(`USAGE: ${(e as Error).message}\n\n${HELP}`)
     return 3
   }
 
+  if (args.help) {
+    io.stdout.write(HELP)
+    return 0
+  }
+
   if (args.html != null && args.positional != null) {
-    process.stderr.write('USAGE: pass either --html or a positional URL/path, not both\n')
+    io.stderr.write('USAGE: pass either --html or a positional URL/path, not both\n')
     return 3
   }
 
   const code = args.script != null
     ? readFileSync(args.script, 'utf8')
-    : await readStdin()
+    : await readAll(io.stdin)
 
-  // CLI consumers usually type a one-liner expression; only auto-return if the
-  // user passed code via stdin and didn't ask for module mode.
+  // CLI consumers usually type a one-liner expression; only auto-return when
+  // the user piped code via stdin and didn't ask for module mode.
   const userCode = args.module || args.script ? code : wrapForReturn(code)
 
   const opts: EvaluateOptions = {
@@ -194,10 +210,32 @@ async function main(): Promise<number> {
   else if (args.positional != null) opts.source = args.positional
 
   const result = await evaluate(userCode, opts)
-  return args.json ? emitJson(result) : emitHuman(result)
+  return args.json ? emitJson(result, io) : emitHuman(result, io)
 }
 
-main().then(code => process.exit(code), e => {
-  process.stderr.write(`FATAL: ${(e as Error).stack ?? String(e)}\n`)
-  process.exit(3)
-})
+/**
+ * Binary entry-point logic. Defaults all I/O streams and the exit hook to the
+ * real `process.*` so calling `runFromProcess()` with no args matches what the
+ * shipped binary does. Tests can inject mocks to drive it in-process.
+ */
+export async function runFromProcess(
+  argv: string[] = process.argv.slice(2),
+  stdin: AsyncIterable<Buffer | Uint8Array | string> = process.stdin,
+  stdout: { write(s: string): unknown } = process.stdout,
+  stderr: { write(s: string): unknown } = process.stderr,
+  exit: (code: number) => never = ((code: number) => process.exit(code)) as (code: number) => never,
+): Promise<never> {
+  let code: number
+  try {
+    code = await runCli({ argv, stdin, stdout, stderr })
+  } catch (e) {
+    stderr.write(`FATAL: ${(e as Error).stack ?? String(e)}\n`)
+    return exit(3)
+  }
+  return exit(code)
+}
+
+// Run when invoked as a script (i.e. via the shebang). Skipped when this
+// module is imported by tests. The single line is verified end-to-end by the
+// subprocess smoke test in cli.test.ts.
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) runFromProcess()

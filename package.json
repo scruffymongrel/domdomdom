@@ -1,6 +1,6 @@
 {
   "name": "domdomdom",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DOM-aware JS evaluator. Pipe code via stdin to run against any HTML page (URL, local file, or inline). Lightweight happy-dom alternative to Playwright for non-layout, non-interactive tasks.",
   "type": "module",
   "main": "./index.ts",

@@ -220,7 +220,7 @@ Layout, screenshots, click/scroll interaction, or untrusted-code isolation. Use 
 
 ```sh
 bun install
-bun test            # 55 tests, 100% line + function coverage on engine and CLI
+bun test            # 60 tests, 100% line + function coverage on engine and CLI
 bun run typecheck   # tsc --noEmit
 bun run quality     # both
 ```

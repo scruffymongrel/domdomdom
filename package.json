@@ -9,7 +9,7 @@
     ".": "./index.ts"
   },
   "bin": {
-    "domdomdom": "./cli.ts"
+    "domdomdom": "cli.ts"
   },
   "files": [
     "cli.ts",

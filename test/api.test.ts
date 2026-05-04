@@ -115,7 +115,7 @@ describe('evaluate()', () => {
       )
       expect(r.ok && r.result).toEqual(['served', 'hi'])
     } finally {
-      server.stop()
+      await server.stop()
     }
   })
 

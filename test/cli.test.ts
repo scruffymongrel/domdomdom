@@ -1,7 +1,7 @@
 import { test, expect, describe } from 'bun:test'
 import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
-import { runCli, runFromProcess, type CliIO } from '../cli.ts'
+import { runCli, runFromProcess, isEntrypoint, type CliIO } from '../cli.ts'
 
 const ROOT = resolve(import.meta.dir, '..')
 
@@ -289,8 +289,24 @@ describe('runFromProcess()', () => {
   })
 })
 
-// Subprocess smoke test — verifies the binary entry point (shebang, runtime,
+// Subprocess smoke tests — verify the binary entry point (shebang, runtime,
 // argv plumbing) actually executes end-to-end as a real process.
+describe('isEntrypoint()', () => {
+  test('false when argv[1] is missing', () => {
+    expect(isEntrypoint(undefined)).toBe(false)
+    expect(isEntrypoint('')).toBe(false)
+  })
+  test('false when argv[1] points at a non-existent path', () => {
+    expect(isEntrypoint('/this/path/does/not/exist/anywhere.xyz')).toBe(false)
+  })
+  test('true when argv[1] resolves to cli.ts', () => {
+    expect(isEntrypoint(resolve(ROOT, 'cli.ts'))).toBe(true)
+  })
+  test('false when argv[1] resolves to a different file', () => {
+    expect(isEntrypoint(resolve(ROOT, 'index.ts'))).toBe(false)
+  })
+})
+
 describe('binary entry point', () => {
   test('runs via the shebang and produces output on stdout', async () => {
     const result = await new Promise<{ exit: number; stdout: string }>((res, rej) => {
@@ -304,5 +320,32 @@ describe('binary entry point', () => {
     })
     expect(result.exit).toBe(0)
     expect(result.stdout.trim()).toBe('3')
+  })
+
+  test('runs via a symlink (covers process.argv[1] vs import.meta.url mismatch)', async () => {
+    // Mirrors how `bun link` / `npm i -g` install the binary — the on-PATH
+    // shim is a symlink into the package. Earlier we used a plain string
+    // equality on the entry-point guard, which silently no-op'd under Node
+    // because the symlink path differs from the real cli.ts path.
+    const { mkdtempSync, symlinkSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const tmp = mkdtempSync(resolve(tmpdir(), 'domdomdom-symlink-'))
+    const link = resolve(tmp, 'domdomdom')
+    symlinkSync(resolve(ROOT, 'cli.ts'), link)
+    try {
+      const result = await new Promise<{ exit: number; stdout: string }>((res, rej) => {
+        const p = spawn('bun', [link], { cwd: ROOT })
+        let stdout = ''
+        p.stdout.on('data', d => { stdout += d.toString() })
+        p.on('error', rej)
+        p.on('close', exit => res({ exit: exit ?? -1, stdout }))
+        p.stdin.write('return 42')
+        p.stdin.end()
+      })
+      expect(result.exit).toBe(0)
+      expect(result.stdout.trim()).toBe('42')
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
   })
 })

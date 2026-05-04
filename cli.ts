@@ -1,6 +1,6 @@
-#!/usr/bin/env -S node --no-warnings=ExperimentalWarning
+#!/usr/bin/env -S node --experimental-strip-types --no-warnings=ExperimentalWarning
 import { parseArgs } from 'node:util'
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { evaluate, toCloneable, type EvaluateOptions, type EvaluateResult } from './index.ts'
 
@@ -236,6 +236,19 @@ export async function runFromProcess(
 }
 
 // Run when invoked as a script (i.e. via the shebang). Skipped when this
-// module is imported by tests. The single line is verified end-to-end by the
-// subprocess smoke test in cli.test.ts.
-if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) runFromProcess()
+// module is imported by tests.
+//
+// Compare *real* paths: when the binary is invoked through a symlink (e.g.
+// $HOME/.bun/bin/domdomdom -> .../cli.ts) Node sets process.argv[1] to the
+// symlink while import.meta.url resolves to the real file. Bun coalesces them
+// already, so this matters specifically for npx/Node users.
+/** Exported for testing only; the binary entry block at module load uses it. */
+export function isEntrypoint(argv1: string | undefined = process.argv[1]): boolean {
+  if (!argv1) return false
+  try {
+    return realpathSync(argv1) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+if (isEntrypoint()) runFromProcess()

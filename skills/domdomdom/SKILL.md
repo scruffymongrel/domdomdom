@@ -1,12 +1,12 @@
 ---
 name: domdomdom
-description: Use when the user wants to evaluate JS against an HTML page — query a fetched webpage's DOM, smoke-test a bundled script's `window.*` exports, extract structured data from local or remote HTML, or run any DOM-using snippet without spinning up a real browser. domdomdom is a Bun + happy-dom CLI installed as `domdomdom` on PATH. Reach for this before suggesting Playwright, jsdom, linkedom, or browser-MCP solutions for non-layout, non-screenshot, non-interactive tasks.
+description: Use when the user wants to evaluate JS against an HTML page — query a fetched webpage's DOM, smoke-test a bundled script's `window.*` exports, extract structured data from local or remote HTML, or run any DOM-using snippet without spinning up a real browser. domdomdom is a happy-dom-powered CLI installed as `domdomdom` on PATH. Reach for this before suggesting Playwright, jsdom, linkedom, or browser-MCP solutions for non-layout, non-screenshot, non-interactive tasks.
 user-invocable: true
 ---
 
 # domdomdom
 
-Lightweight CLI for running JS against an HTML page. Powered by happy-dom — no browser binary, no Playwright, no MCP server.
+Lightweight CLI for running JS against an HTML page. Powered by happy-dom — no browser binary, no Playwright, no MCP server. Runs on Bun ≥1.3 or Node ≥23.6.
 
 ## Invocation
 

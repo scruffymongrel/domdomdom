@@ -6,7 +6,7 @@ Evaluate JavaScript against an HTML page from the command line. Pipe in code, ge
 echo "return document.querySelectorAll('h1').length" | domdomdom https://example.com
 ```
 
-Powered by [happy-dom](https://github.com/capricorn86/happy-dom). No browser binary, no Playwright install, no MCP server. ~170MB of Chromium it ain't — it's one Bun script.
+Powered by [happy-dom](https://github.com/capricorn86/happy-dom). No browser binary, no Playwright install, no MCP server. Two TypeScript files, ~12KB on npm.
 
 ## Why this exists
 
@@ -35,12 +35,12 @@ Each of these is a one-line fix once you've found it. Finding them took an after
 
 ```sh
 # global install
-bun add -g github:scruffymongrel/domdomdom
-npm install -g github:scruffymongrel/domdomdom
+bun add -g domdomdom
+npm install -g domdomdom
 
 # one-off, no install
-bunx github:scruffymongrel/domdomdom ./page.html
-npx github:scruffymongrel/domdomdom https://example.com
+bunx domdomdom ./page.html
+npx domdomdom https://example.com
 
 # clone for development
 git clone https://github.com/scruffymongrel/domdomdom && cd domdomdom && bun link
@@ -174,11 +174,12 @@ Restart Claude Code. The skill auto-loads when the user's prompt matches its tri
 
 ### Other agents (Cursor, Aider, Codex CLI, Copilot, etc.)
 
-The skill follows the [Agent Skills open standard](https://agentskills.io/specification) — an emerging cross-agent format that's just `SKILL.md` with YAML frontmatter. To use it with any agent that supports the standard, copy the skill folder into that agent's skill directory:
+The skill follows the [Agent Skills open standard](https://agentskills.io/specification) — an emerging cross-agent format that's just `SKILL.md` with YAML frontmatter. After installing domdomdom (`npm i -g domdomdom`), the skill ships at `$(npm root -g)/domdomdom/skills/domdomdom/`. Copy it into your agent's skill directory:
 
 ```sh
-# After cloning or installing domdomdom
-cp -r skills/domdomdom <your-agent>/skills/
+cp -r "$(npm root -g)/domdomdom/skills/domdomdom" <your-agent>/skills/
+# or, from a clone:
+cp -r ./skills/domdomdom <your-agent>/skills/
 ```
 
 For agents without skill support, paste this into your system prompt (covers ~90% of usage):
@@ -219,11 +220,11 @@ Layout, screenshots, click/scroll interaction, or untrusted-code isolation. Use 
 
 ```sh
 bun install
-bun test            # 33 tests
+bun test            # 55 tests, 100% line + function coverage on engine and CLI
 bun run typecheck   # tsc --noEmit
 bun run quality     # both
 ```
 
 ## License
 
-MIT.
+[MIT](LICENSE).

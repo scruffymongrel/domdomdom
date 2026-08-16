@@ -28,6 +28,15 @@ Invariants — these are the ways to get it wrong:
   `version` npm lifecycle script syncs and stages it during `npm version`,
   landing both in the same release commit. Don't set it by hand; a test asserts
   they match, so drift fails CI.
+
+  This is load-bearing, not hygiene: `plugin.json`'s `version` is the cache key
+  Claude Code uses to decide whether a plugin update is available. If it stops
+  changing, `/plugin update` silently skips the plugin and users stay on an old
+  build no matter what else moves.
+- **The `release` branch is the plugin channel.** `scruffymongrel/claude-plugins`
+  pins `ref: release`, and the release workflow fast-forwards it after a
+  successful publish. Don't push to it by hand — that would ship plugin content
+  for a version that isn't on npm.
 - **Never rename `.github/workflows/release.yml`.** npm's trusted publisher is
   keyed to repo *and workflow filename*. Renaming it breaks publishing with an
   auth error at the final step, after the version has already been bumped and

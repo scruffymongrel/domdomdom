@@ -91,7 +91,25 @@ jobs:
       - name: Publish to npm
         run: npm publish --access public
 
+      # The Claude Code plugin channel. scruffymongrel/claude-plugins pins
+      # `ref: release`, so advancing this branch is what ships the plugin —
+      # replacing a hand-written "bump domdomdom pin to vX.Y.Z" commit in that
+      # repo after every release.
+      #
+      # Deliberately after npm publish, so the plugin never points at a version
+      # that isn't on npm. And deliberately a branch rather than main: the
+      # plugin ships the skill, which documents the CLI that users install
+      # separately from npm, so plugin content has to describe the *released*
+      # version rather than whatever main happens to be at.
+      #
+      # Consumers still only see an update when plugin.json's version changes —
+      # that field is Claude Code's update cache key — which is exactly when a
+      # release moves this branch.
+      - name: Advance the plugin release channel
+        run: git push origin HEAD:release
+
       - name: Summary
         run: |
           echo "Published \`domdomdom@${{ steps.bump.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "https://www.npmjs.com/package/domdomdom/v/${{ steps.bump.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Plugin channel \`release\` advanced to \`v${{ steps.bump.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"

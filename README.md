@@ -254,6 +254,8 @@ gh workflow run release.yml -f bump=patch|minor|major
 
 CI runs the quality gate and Node smoke test, then bumps the version, commits, tags, pushes and publishes to npm via [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC), with provenance attestation. It refuses to run anywhere but `main`.
 
+The same run fast-forwards the `release` branch, which is the Claude Code plugin channel — the marketplace pins `ref: release`, so the plugin ships when npm does, with no separate step.
+
 Don't bump `version` in `package.json` by hand — CI owns it, and a manual bump double-bumps. Don't rename `.github/workflows/release.yml` either; npm's trusted publisher is keyed to the repo *and* the workflow filename.
 
 ## License

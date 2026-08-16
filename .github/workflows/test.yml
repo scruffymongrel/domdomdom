@@ -10,7 +10,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -23,12 +23,16 @@ jobs:
   node:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
       - run: bun install --frozen-lockfile
       - run: bun run smoke:node
+      # Installs the packed tarball and runs it the way users get it, which
+      # smoke:node can't — it runs cli.ts from the checkout, where Node's type
+      # stripping is allowed and node_modules' isn't.
+      - run: bun run smoke:pack

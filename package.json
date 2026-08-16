@@ -25,6 +25,7 @@
     "typecheck": "tsc --noEmit",
     "quality": "tsc --noEmit && bun test",
     "smoke:node": "node scripts/smoke-node.mjs",
+    "smoke:pack": "node scripts/smoke-pack.mjs",
     "version": "node scripts/sync-plugin-version.mjs && git add .claude-plugin/plugin.json",
     "prepublishOnly": "bun run quality && bun run smoke:node"
   },
@@ -51,7 +52,10 @@
     "testing",
     "cli",
     "claude-code",
-    "agent-skill"
+    "agent-skill",
+    "xpath",
+    "document-evaluate",
+    "htmx"
   ],
   "devDependencies": {
     "@types/bun": "latest",

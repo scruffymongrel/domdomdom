@@ -39,7 +39,7 @@ jobs:
           echo "::error::Releases must run on main; got ${{ github.ref }}"
           exit 1
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -47,7 +47,7 @@ jobs:
         with:
           bun-version: latest
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
           registry-url: https://registry.npmjs.org

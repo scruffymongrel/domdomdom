@@ -8,6 +8,13 @@
 // ESM. htmx booting is a good single assertion for all of it, since it needs
 // the XPath polyfill installed before script extraction runs the page's own
 // script tag.
+//
+// KNOWN GAP — this runs cli.ts from the repo checkout, which is NOT how users
+// get it. Node refuses to strip types for files under node_modules
+// (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING), so `npm i domdomdom` followed
+// by running it under Node fails even though this passes. See
+// scripts/smoke-pack.mjs, which installs the packed tarball and catches that
+// class of bug; this file only covers the checkout path.
 import { execFileSync } from 'node:child_process'
 
 const out = execFileSync(

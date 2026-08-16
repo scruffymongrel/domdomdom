@@ -15,6 +15,9 @@
     "html",
     "evaluation",
     "scraping",
-    "testing"
+    "testing",
+    "xpath",
+    "document-evaluate",
+    "htmx"
   ]
 }

@@ -23,6 +23,11 @@ Invariants — these are the ways to get it wrong:
 - **Never hand-edit `version` in `package.json`.** CI owns it. Don't pre-bump a
   version "ready for release" either; the workflow bumps from whatever is on
   main, so a manual bump double-bumps.
+- **`.claude-plugin/plugin.json` tracks `package.json`.** They're one artifact
+  on one cadence — the plugin manifest ships inside the npm tarball — so the
+  `version` npm lifecycle script syncs and stages it during `npm version`,
+  landing both in the same release commit. Don't set it by hand; a test asserts
+  they match, so drift fails CI.
 - **Never rename `.github/workflows/release.yml`.** npm's trusted publisher is
   keyed to repo *and workflow filename*. Renaming it breaks publishing with an
   auth error at the final step, after the version has already been bumped and

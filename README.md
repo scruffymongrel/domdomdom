@@ -237,9 +237,24 @@ bun install
 bun test            # coverage runs and is gated by bunfig.toml
 bun run typecheck   # tsc --noEmit
 bun run quality     # both
+bun run smoke:node  # runs the shipped .ts bin under Node
 ```
 
 Coverage is **enforced**, not just reported: `bunfig.toml` sets `coverageThreshold = { lines = 1.0, functions = 1.0 }`, so `bun test` (and therefore CI) fails if line or function coverage on `index.ts` / `cli.ts` drops below 100%. Note the keys are plural — bun silently ignores `line`/`function`, which gates nothing.
+
+The test suite runs under Bun only, but Node is a supported runtime, so `smoke:node` drives the shipped CLI under Node as a separate CI job.
+
+## Releasing
+
+Releases are fully automated — there are no manual steps and no npm token.
+
+```sh
+gh workflow run release.yml -f bump=patch|minor|major
+```
+
+CI runs the quality gate and Node smoke test, then bumps the version, commits, tags, pushes and publishes to npm via [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC), with provenance attestation. It refuses to run anywhere but `main`.
+
+Don't bump `version` in `package.json` by hand — CI owns it, and a manual bump double-bumps. Don't rename `.github/workflows/release.yml` either; npm's trusted publisher is keyed to the repo *and* the workflow filename.
 
 ## License
 

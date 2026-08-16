@@ -1,6 +1,7 @@
 import { Browser } from 'happy-dom'
 import { resolve, dirname } from 'node:path'
 import { readFileSync } from 'node:fs'
+import wgxpath from 'wicked-good-xpath'
 
 export type ConsoleLevel = 'log' | 'warn' | 'error' | 'info' | 'debug'
 
@@ -28,6 +29,12 @@ export interface EvaluateOptions {
   viewport?: { width: number; height: number }
   /** If true, console.* calls are dropped instead of captured. */
   quietConsole?: boolean
+  /**
+   * Polyfill `document.evaluate` / `window.XPathEvaluator` (the DOM XPath
+   * API — happy-dom doesn't implement it). Opt-in: pulls in wicked-good-xpath
+   * and patches the window before any page script runs.
+   */
+  xpath?: boolean
 }
 
 export type EvaluateError =
@@ -110,6 +117,80 @@ function patchBuiltins(window: object): void {
   }
 }
 
+interface XPathCapableWindow {
+  document: {
+    evaluate: (...args: unknown[]) => unknown
+    createExpression: (
+      expression: string,
+      resolver?: unknown,
+    ) => { evaluate: (...args: unknown[]) => unknown }
+    createNSResolver: (node: unknown) => unknown
+  }
+  XPathEvaluator?: unknown
+  XPathResult?: unknown
+}
+
+// happy-dom doesn't implement window.XPathEvaluator / document.evaluate (the
+// DOM Level 3 XPath API). htmx 4 uses `new XPathEvaluator().createExpression(...)`
+// internally (for hx-on attribute matching) and throws ReferenceError without
+// it. wicked-good-xpath (Google's pure-JS XPath 1.0 engine, MIT — formerly
+// powered Selenium-on-IE) polyfills document.evaluate over standard DOM
+// traversal, but needs three adjustments to work against happy-dom:
+//
+// 1. happy-dom's `window.Document` is a distinct synthetic subclass from the
+//    class actually backing `window.document` (`window.document`'s prototype
+//    chain never reaches `window.Document.prototype`). wgxpath.install()
+//    auto-dispatches to `window.Document.prototype` when present, silently
+//    patching the wrong class. Passing a bare `{ document }` shim (no
+//    `.Document` property) starves that branch so it falls through to
+//    patching `document` directly, as an own property — which is what
+//    `window.document` actually uses.
+// 2. wgxpath's XPathExpression#evaluate has no default for its `type` param.
+//    Spec-compliant callers that omit it (relying on the WebIDL `optional
+//    unsigned short type = 0` default, e.g. htmx's `expr.evaluate(node)`) hit
+//    "Unknown XPathResult type." instead of getting auto-detection. Wrap it
+//    to apply that default ourselves.
+// 3. Real browsers expose a global `XPathEvaluator` constructor — the
+//    interface `Document` implements, but also usable standalone. wgxpath
+//    only patches `document`, so synthesize the constructor from it.
+function installXPath(window: object): void {
+  const win = window as XPathCapableWindow
+  // wgxpath.install(target) also sets `target.XPathResult` as a side effect —
+  // on the real target, not on `win`, since we hand it the `{ document }`
+  // shim rather than `win` itself (see point 1 above). Recover it from there.
+  const shim: { document: XPathCapableWindow['document']; XPathResult?: unknown } = {
+    document: win.document,
+  }
+  wgxpath.install(shim)
+  if (!win.XPathResult) win.XPathResult = shim.XPathResult
+
+  const nativeCreateExpression = win.document.createExpression.bind(win.document)
+  win.document.createExpression = (expression: string, resolver?: unknown) => {
+    const expr = nativeCreateExpression(expression, resolver)
+    const nativeEvaluate = expr.evaluate.bind(expr)
+    expr.evaluate = (...args: unknown[]) => {
+      const [contextNode, type, result] = args
+      return nativeEvaluate(contextNode, type ?? 0, result)
+    }
+    return expr
+  }
+
+  const nativeEvaluate = win.document.evaluate.bind(win.document)
+  win.document.evaluate = (...args: unknown[]) => {
+    const [expression, contextNode, resolver, type, result] = args
+    return nativeEvaluate(expression, contextNode, resolver, type ?? 0, result)
+  }
+
+  if (!win.XPathEvaluator) {
+    function XPathEvaluator(this: unknown): void {}
+    XPathEvaluator.prototype.createExpression = (expression: string, resolver?: unknown) =>
+      win.document.createExpression(expression, resolver)
+    XPathEvaluator.prototype.createNSResolver = (node: unknown) => win.document.createNSResolver(node)
+    XPathEvaluator.prototype.evaluate = (...args: unknown[]) => win.document.evaluate(...args)
+    win.XPathEvaluator = XPathEvaluator
+  }
+}
+
 function fmtArg(a: unknown): string {
   if (typeof a === 'string') return a
   try {
@@ -183,6 +264,7 @@ export async function evaluate(
   const setupWindow = (w: object): void => {
     patchBuiltins(w)
     captureConsole(w as never, logs, !!opts.quietConsole)
+    if (opts.xpath) installXPath(w)
   }
 
   const settings: Record<string, unknown> = {

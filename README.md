@@ -77,6 +77,7 @@ domdomdom [options] [URL_OR_PATH]
 | ---------------- | ----------------------------------------------------------- |
 | `--inject <f>`   | preload a JS file in the window before user code; repeatable |
 | `--module`       | evaluate user code as ES module (allows top-level `import`) |
+| `--xpath`        | polyfill `document.evaluate` / `window.XPathEvaluator` (happy-dom doesn't implement DOM XPath) |
 | `--user-agent`   | override `navigator.userAgent`                              |
 | `--viewport WxH` | override page viewport (e.g. `1024x768`)                    |
 | `--timeout <ms>` | time limit; `0` disables; default `5000`                    |
@@ -138,6 +139,7 @@ interface EvaluateOptions {
   timeout?: number        // ms; 0 disables; default 5000
   module?: boolean        // treat user code as ES module
   inject?: string[]       // preload JS files in window before user code
+  xpath?: boolean         // polyfill document.evaluate / window.XPathEvaluator
   userAgent?: string      // navigator.userAgent override
   viewport?: { width: number; height: number }
   quietConsole?: boolean  // drop console.* instead of capturing
@@ -216,11 +218,25 @@ Layout, screenshots, click/scroll interaction, or untrusted-code isolation. Use 
 - **Source maps.** Stack traces refer to evaluated-script offsets, not your original `.ts` files.
 - **`outerHTML` round-trips drop reactive inline styles.** If a custom element sets inline styles in `attributeChangedCallback` (e.g. `this.style.display = 'grid'`), assigning `outerHTML` can clobber pre-existing inline styles in the markup. Real browsers preserve them. Don't trust `el.style.getPropertyValue(...)` after a happy-dom `outerHTML` round-trip if the SUT has reactive style assignments.
 
+## XPath support (`--xpath` / `xpath: true`, opt-in)
+
+happy-dom doesn't implement the DOM XPath API (`document.evaluate`, `window.XPathEvaluator`) — a real gap, since it's standard in every browser. This surfaced concretely: htmx 4 uses `new XPathEvaluator().createExpression(...)` internally for `hx-on` attribute matching, and without this flag domdomdom can't execute an htmx-4 page at all (`ReferenceError: XPathEvaluator is not defined`).
+
+`--xpath` polyfills it with [wicked-good-xpath](https://github.com/google/wicked-good-xpath) (Google's pure-JS XPath 1.0 engine, MIT — formerly powered Selenium-on-IE), patched for three happy-dom-specific quirks; see `installXPath()` in `index.ts` for the details. Off by default — it's an extra dependency and an extra window patch most callers don't need.
+
+```sh
+echo 'return document.evaluate("//td[2]", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue.textContent' \
+  | domdomdom --xpath --html '<table><tr><td>a</td><td>b</td></tr></table>'
+# b
+```
+
+Covers DOM XPath 1.0 (`document.evaluate`, `createExpression`, `createNSResolver`, the `XPathEvaluator` constructor, `XPathResult` type constants). No XPath 2.0+ (sequences, `for`/`let`, richer type system) — wicked-good-xpath doesn't implement it and nothing found in htmx 4 needs it.
+
 ## Development
 
 ```sh
 bun install
-bun test            # 60 tests, 100% line + function coverage on engine and CLI
+bun test            # 67 tests, 100% line + function coverage on engine and CLI
 bun run typecheck   # tsc --noEmit
 bun run quality     # both
 ```

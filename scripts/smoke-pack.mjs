@@ -2,15 +2,15 @@
 // the tarball into a scratch project, run the installed bin.
 //
 // This exists because scripts/smoke-node.mjs runs cli.ts from the repo
-// checkout, and that difference hides a real failure — Node refuses to strip
-// types for files under node_modules, so an npm-installed domdomdom throws
+// checkout, and that difference hid a real failure: Node refuses to strip types
+// for files under node_modules, so the npm-installed .ts bin threw
 // ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING under Node while the checkout
-// works fine. Testing the checkout gave false confidence through v0.1.0,
-// v0.1.1 and v0.2.0.
+// worked fine — broken from v0.1.0 through v0.2.0 with CI green throughout.
 //
-// Bun strips types anywhere, so it runs the installed package happily. Both
-// runtimes are asserted separately below: Bun is expected to pass, and Node is
-// reported rather than asserted until the packaging question is settled.
+// The package now ships compiled JS (see scripts/build.mjs), so both runtimes
+// must work and both are asserted. `npm pack` triggers prepack, so the tarball
+// under test is always freshly built rather than whatever dist/ happened to
+// contain.
 import { execFileSync, execSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -24,16 +24,20 @@ const dir = mkdtempSync(join(tmpdir(), 'domdomdom-pack-'))
 let failed = false
 
 try {
-  const packed = JSON.parse(execSync('npm pack --json', { encoding: 'utf8' }))[0].filename
-  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'scratch', private: true }))
-  execSync(`npm i "${process.cwd()}/${packed}" --silent --no-audit --no-fund`, { cwd: dir })
-  rmSync(packed, { force: true })
+  // --pack-destination rather than --json: prepack runs the build, whose output
+  // lands on the same stdout and would corrupt any JSON we tried to parse.
+  execSync(`npm pack --pack-destination "${dir}"`, { stdio: 'ignore' })
+  const tgz = readdirSync(dir).find(f => f.endsWith('.tgz'))
+  if (!tgz) throw new Error('npm pack produced no tarball')
 
-  const bin = join(dir, 'node_modules', 'domdomdom', 'cli.ts')
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'scratch', private: true }))
+  execSync(`npm i "${join(dir, tgz)}" --silent --no-audit --no-fund`, { cwd: dir })
+
+  const bin = join(dir, 'node_modules', 'domdomdom', 'dist', 'cli.js')
 
   for (const [runtime, argv] of [
     ['bun', ['bun', bin]],
-    ['node', [process.execPath, '--experimental-strip-types', '--no-warnings=ExperimentalWarning', bin]],
+    ['node', [process.execPath, bin]],
   ]) {
     let result
     try {
@@ -51,14 +55,10 @@ try {
     }
 
     console.log(`installed package via ${runtime}: ${result}`)
-    // Bun is the runtime the published .ts package genuinely supports, so only
-    // that one gates the build. Node is printed for visibility; flip this to a
-    // hard failure once the package ships something Node can execute.
-    if (runtime === 'bun' && result !== 'ok') failed = true
+    if (result !== 'ok') failed = true
   }
 } finally {
   rmSync(dir, { recursive: true, force: true })
-  for (const f of readdirSync('.')) if (f.startsWith('domdomdom-') && f.endsWith('.tgz')) rmSync(f)
 }
 
 process.exit(failed ? 1 : 0)

@@ -57,17 +57,27 @@ of the automation is that the bump, tag and publish are inseparable.
 
 ```sh
 bun run quality      # tsc --noEmit + bun test (coverage gated, see bunfig.toml)
-bun run smoke:node   # runs the shipped .ts bin under Node
+bun run smoke:node   # runs the CLI from the checkout under Node
+bun run smoke:pack   # packs, installs the tarball, runs it under Node AND Bun
+bun run build        # compile dist/ (runs automatically via prepack)
 ```
 
 - **Coverage is enforced at 100%** (lines + functions) on `index.ts` and
   `cli.ts` via `bunfig.toml`. New code needs tests or the build fails. Note the
   threshold keys are plural (`lines`/`functions`) — bun silently ignores the
   singular spellings, gating nothing.
-- **Node is a supported runtime** (`engines.node >=23.6`) but `bun:test` can
-  only exercise Bun. Anything touching module resolution, the bin, or a
-  dependency's packaging needs `smoke:node` to stay honest — it runs in PR CI
-  as its own job.
+- **Node is a supported runtime** (`engines.node >=20`) but `bun:test` can only
+  exercise Bun. Anything touching module resolution, the bin, or a dependency's
+  packaging needs the smoke tests to stay honest; both run in PR CI.
+- **Test the artifact, not the checkout.** `smoke:node` runs the CLI from the
+  repo, where Node's type stripping is permitted; that difference hid a bug
+  that shipped three times — Node refuses to strip types under `node_modules`,
+  so the `.ts` bin threw on every npm+Node install from v0.1.0 to v0.2.0 with CI
+  green throughout. The package now ships compiled JS, and `smoke:pack`
+  installs the real tarball and gates on both runtimes. When you change
+  anything about packaging, trust `smoke:pack` and nothing else.
+- **`dist/` is built, gitignored, and never hand-edited.** `prepack` builds it,
+  so `npm pack` and `npm publish` always compile fresh. Source stays `.ts`.
 
 ## Things that bite in this codebase
 

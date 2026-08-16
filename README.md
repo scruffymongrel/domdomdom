@@ -48,10 +48,12 @@ git clone https://github.com/scruffymongrel/domdomdom && cd domdomdom && bun lin
 
 ### Runtime requirements
 
-- **Bun** ≥ 1.3 — works out of the box.
-- **Node** ≥ 23.6 (LTS: 24+) — uses Node's built-in TypeScript stripping. The shebang silences the experimental-feature warning automatically. Node 22 LTS users need `node --experimental-strip-types` set in `NODE_OPTIONS`, or just install via Bun.
+- **Bun** ≥ 1.3
+- **Node** ≥ 20 (both current LTS lines included)
 
-No build step. The published package ships `.ts` source directly; both runtimes execute it natively.
+The repo is TypeScript; the published package ships compiled JS built at pack time, so both runtimes run it as installed with no flags.
+
+Through v0.2.0 the package shipped `.ts` source directly and claimed both runtimes executed it natively. They didn't: Node refuses to strip types for files under `node_modules`, so `npm i domdomdom` followed by running it under Node threw `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` — broken since the first release, and invisible to CI because the tests ran the source from a checkout. Compiling also let the Node floor drop from 23.6 (a type-stripping artifact) to happy-dom's actual floor of 20.
 
 ## CLI
 
@@ -237,12 +239,16 @@ bun install
 bun test            # coverage runs and is gated by bunfig.toml
 bun run typecheck   # tsc --noEmit
 bun run quality     # both
-bun run smoke:node  # runs the shipped .ts bin under Node
+bun run build       # compile dist/ (also runs automatically via prepack)
+bun run smoke:node  # run the CLI from the checkout under Node
+bun run smoke:pack  # pack, install the tarball, run it under Node AND Bun
 ```
 
 Coverage is **enforced**, not just reported: `bunfig.toml` sets `coverageThreshold = { lines = 1.0, functions = 1.0 }`, so `bun test` (and therefore CI) fails if line or function coverage on `index.ts` / `cli.ts` drops below 100%. Note the keys are plural — bun silently ignores `line`/`function`, which gates nothing.
 
-The test suite runs under Bun only, but Node is a supported runtime, so `smoke:node` drives the shipped CLI under Node as a separate CI job.
+The test suite runs under Bun only, but Node is a supported runtime, so `smoke:node` drives the CLI under Node as a separate CI job.
+
+`smoke:pack` is the one that matters for packaging: it packs the tarball, installs it into a scratch project, and runs the *installed* binary under both runtimes. Testing the checkout alone is what let a broken Node install ship three times.
 
 ## Releasing
 

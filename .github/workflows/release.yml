@@ -1,0 +1,97 @@
+name: release
+
+# The whole release happens here so it can't be assembled by hand: quality
+# gate, version bump, commit, tag, push and publish are one sequence or none of
+# it. Nothing to remember, nothing to get out of order.
+#
+# Auth is npm Trusted Publishing (OIDC) — there is deliberately no NPM_TOKEN.
+# npm verifies this repo + this workflow filename directly, and generates a
+# provenance attestation automatically. If the publish step fails with an auth
+# error, the trusted publisher on npmjs.com is missing or points at a different
+# workflow filename; renaming this file breaks publishing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semver bump
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+        required: true
+
+permissions:
+  contents: write # push the release commit and tag
+  id-token: write # OIDC identity for npm trusted publishing
+
+# Two releases at once would race on the version bump and the push.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse to release from anywhere but main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Releases must run on main; got ${{ github.ref }}"
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing requires npm >= 11.5.1, newer than what Node bundles.
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - run: bun install --frozen-lockfile
+
+      # Gate before touching the version: typecheck, tests, coverage threshold.
+      - name: Quality gate
+        run: bun run quality
+
+      # Node is a supported runtime but bun:test can't cover it. See
+      # scripts/smoke-node.mjs.
+      - name: Node smoke test
+        run: bun run smoke:node
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # npm version bumps package.json, commits, and creates the annotated tag
+      # in one step — matching the chore(release): vX.Y.Z convention used for
+      # v0.1.0 and v0.1.1, and making it impossible for the tag and the
+      # package.json version to disagree the way they drifted at v0.1.1.
+      - name: Bump version
+        id: bump
+        run: |
+          npm version "${{ inputs.bump }}" -m "chore(release): v%s"
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Push before publishing. npm publish is irreversible; a push is not. If
+      # the push fails we must not already have shipped a version that git has
+      # no record of.
+      - name: Push release commit and tag
+        run: git push --follow-tags origin main
+
+      - name: Publish to npm
+        run: npm publish --access public
+
+      - name: Summary
+        run: |
+          echo "Published \`domdomdom@${{ steps.bump.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://www.npmjs.com/package/domdomdom/v/${{ steps.bump.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"

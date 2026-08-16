@@ -23,7 +23,9 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "quality": "tsc --noEmit && bun test"
+    "quality": "tsc --noEmit && bun test",
+    "smoke:node": "node scripts/smoke-node.mjs",
+    "prepublishOnly": "bun run quality && bun run smoke:node"
   },
   "engines": {
     "node": ">=23.6",

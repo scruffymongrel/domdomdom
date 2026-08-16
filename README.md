@@ -234,10 +234,12 @@ Covers DOM XPath 1.0 (`document.evaluate`, `createExpression`, `createNSResolver
 
 ```sh
 bun install
-bun test            # 67 tests, 100% line + function coverage on engine and CLI
+bun test            # coverage runs and is gated by bunfig.toml
 bun run typecheck   # tsc --noEmit
 bun run quality     # both
 ```
+
+Coverage is **enforced**, not just reported: `bunfig.toml` sets `coverageThreshold = { lines = 1.0, functions = 1.0 }`, so `bun test` (and therefore CI) fails if line or function coverage on `index.ts` / `cli.ts` drops below 100%. Note the keys are plural — bun silently ignores `line`/`function`, which gates nothing.
 
 ## License
 

@@ -1,0 +1,11 @@
+[test]
+# Coverage was already 100% on the engine and CLI, but nothing enforced it —
+# `bun test` passed regardless, so CI would have stayed green as coverage
+# drifted down. These thresholds make a drop a test failure.
+#
+# NB: the keys are plural (`lines`/`functions`). Bun silently ignores the
+# singular spellings, which looks enforced but gates nothing — verified by
+# adding an uncovered function and watching each variant's exit code.
+coverage = true
+coverageSkipTestFiles = true
+coverageThreshold = { lines = 1.0, functions = 1.0 }

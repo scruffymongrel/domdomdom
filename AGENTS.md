@@ -66,9 +66,16 @@ bun run build        # compile dist/ (runs automatically via prepack)
   `cli.ts` via `bunfig.toml`. New code needs tests or the build fails. Note the
   threshold keys are plural (`lines`/`functions`) — bun silently ignores the
   singular spellings, gating nothing.
+- **The toolchain is Bun-only. Never add a step that requires Node locally.**
+  Scripts run under `bun`, the build shells out to `bunx tsc`, and packing uses
+  `bun pm pack` / `bun add` rather than npm. Node is a *target* runtime, not a
+  build dependency.
 - **Node is a supported runtime** (`engines.node >=20`) but `bun:test` can only
-  exercise Bun. Anything touching module resolution, the bin, or a dependency's
-  packaging needs the smoke tests to stay honest; both run in PR CI.
+  exercise Bun. The Node-executing checks skip with a notice when Node isn't
+  installed — but they hard-fail instead when `CI` is set, so a broken
+  `setup-node` can't masquerade as a pass. Anything touching module resolution,
+  the bin, or a dependency's packaging needs these to stay honest; both run in
+  PR CI.
 - **Test the artifact, not the checkout.** `smoke:node` runs the CLI from the
   repo, where Node's type stripping is permitted; that difference hid a bug
   that shipped three times — Node refuses to strip types under `node_modules`,

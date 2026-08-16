@@ -32,7 +32,8 @@ run('bun', [
 ])
 
 // Types for library consumers, who got them for free back when we shipped .ts.
-run('npx', ['tsc', '-p', 'tsconfig.build.json'])
+// bunx, not npx: nothing in the local toolchain should require Node.
+run('bunx', ['tsc', '-p', 'tsconfig.build.json'])
 
 // bun build carries the source shebang through verbatim, and cli.ts's is
 // tuned for running the .ts directly from a checkout. The built file is plain

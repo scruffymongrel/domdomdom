@@ -250,6 +250,8 @@ The test suite runs under Bun only, but Node is a supported runtime, so `smoke:n
 
 `smoke:pack` is the one that matters for packaging: it packs the tarball, installs it into a scratch project, and runs the *installed* binary under both runtimes. Testing the checkout alone is what let a broken Node install ship three times.
 
+Developing domdomdom needs only Bun — the scripts run under `bun`, the build uses `bunx tsc`, and packing uses `bun pm pack`. The checks that execute Node skip with a notice if Node isn't installed, and hard-fail instead when `CI` is set so a missing runtime can't pass silently.
+
 ## Releasing
 
 Releases are fully automated — there are no manual steps and no npm token.

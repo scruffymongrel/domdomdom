@@ -16,9 +16,14 @@
 // scripts/smoke-pack.mjs, which installs the packed tarball and catches that
 // class of bug; this file only covers the checkout path.
 import { execFileSync } from 'node:child_process'
+import { requireNodeOrSkip } from './node-bin.mjs'
+
+// Runs under Bun, so process.execPath is the bun binary — resolve Node itself.
+const node = requireNodeOrSkip('node smoke')
+if (!node) process.exit(0)
 
 const out = execFileSync(
-  process.execPath,
+  node,
   [
     '--experimental-strip-types',
     '--no-warnings=ExperimentalWarning',
@@ -42,4 +47,4 @@ if (!parsed.ok || parsed.result !== 'object') {
   process.exit(1)
 }
 
-console.log(`node smoke ok (${process.version})`)
+console.log(`node smoke ok (${node})`)

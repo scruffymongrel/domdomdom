@@ -8,13 +8,14 @@
 // worked fine — broken from v0.1.0 through v0.2.0 with CI green throughout.
 //
 // The package now ships compiled JS (see scripts/build.mjs), so both runtimes
-// must work and both are asserted. `npm pack` triggers prepack, so the tarball
+// must work and both are asserted. `bun pm pack` triggers prepack, so the tarball
 // under test is always freshly built rather than whatever dist/ happened to
 // contain.
 import { execFileSync, execSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { requireNodeOrSkip } from './node-bin.mjs'
 
 const HTML = '<table><tr><td>a</td><td>b</td></tr></table>'
 const CODE =
@@ -24,20 +25,24 @@ const dir = mkdtempSync(join(tmpdir(), 'domdomdom-pack-'))
 let failed = false
 
 try {
-  // --pack-destination rather than --json: prepack runs the build, whose output
-  // lands on the same stdout and would corrupt any JSON we tried to parse.
-  execSync(`npm pack --pack-destination "${dir}"`, { stdio: 'ignore' })
+  // bun pm pack, not npm pack: the toolchain shouldn't need Node installed.
+  // It runs prepack the same way, so the tarball is always freshly built.
+  execSync(`bun pm pack --destination "${dir}"`, { stdio: 'ignore' })
   const tgz = readdirSync(dir).find(f => f.endsWith('.tgz'))
-  if (!tgz) throw new Error('npm pack produced no tarball')
+  if (!tgz) throw new Error('bun pm pack produced no tarball')
 
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'scratch', private: true }))
-  execSync(`npm i "${join(dir, tgz)}" --silent --no-audit --no-fund`, { cwd: dir })
+  execSync(`bun add "${join(dir, tgz)}"`, { cwd: dir, stdio: 'ignore' })
 
   const bin = join(dir, 'node_modules', 'domdomdom', 'dist', 'cli.js')
 
+  // Node is a target runtime, not a toolchain requirement — skip its half when
+  // Node isn't installed. CI always has it, so the gate still holds there.
+  const node = requireNodeOrSkip('installed package via node')
+
   for (const [runtime, argv] of [
     ['bun', ['bun', bin]],
-    ['node', [process.execPath, bin]],
+    ...(node ? [['node', [node, bin]]] : []),
   ]) {
     let result
     try {

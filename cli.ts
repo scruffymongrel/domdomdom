@@ -24,7 +24,6 @@ Code (pick one):
 Other options:
   --inject <file>           preload a JS file in the window before user code (repeatable)
   --module                  evaluate as ES module (allows top-level import)
-  --xpath                   polyfill document.evaluate / window.XPathEvaluator
   --user-agent <ua>         override navigator.userAgent
   --viewport <WxH>          override page viewport, e.g. 1024x768
   --timeout <ms>            time limit; 0 disables; default 5000
@@ -50,7 +49,6 @@ interface Args {
   script: string | undefined
   inject: string[]
   module: boolean
-  xpath: boolean
   userAgent: string | undefined
   viewport: { width: number; height: number } | undefined
   timeout: number
@@ -84,7 +82,6 @@ function parseCli(argv: string[]): Args {
       script: { type: 'string' },
       inject: { type: 'string', multiple: true },
       module: { type: 'boolean' },
-      xpath: { type: 'boolean' },
       'user-agent': { type: 'string' },
       viewport: { type: 'string' },
       timeout: { type: 'string' },
@@ -98,7 +95,6 @@ function parseCli(argv: string[]): Args {
     script: values.script,
     inject: values.inject ?? [],
     module: !!values.module,
-    xpath: !!values.xpath,
     userAgent: values['user-agent'],
     viewport: values.viewport ? parseViewport(values.viewport) : undefined,
     timeout: values.timeout != null ? Number(values.timeout) : 5000,
@@ -205,7 +201,6 @@ export async function runCli(io: CliIO): Promise<number> {
   const opts: EvaluateOptions = {
     timeout: args.timeout,
     module: args.module,
-    xpath: args.xpath,
     inject: args.inject,
     userAgent: args.userAgent,
     viewport: args.viewport,

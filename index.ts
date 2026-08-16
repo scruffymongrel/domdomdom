@@ -29,12 +29,6 @@ export interface EvaluateOptions {
   viewport?: { width: number; height: number }
   /** If true, console.* calls are dropped instead of captured. */
   quietConsole?: boolean
-  /**
-   * Polyfill `document.evaluate` / `window.XPathEvaluator` (the DOM XPath
-   * API — happy-dom doesn't implement it). Opt-in: pulls in wicked-good-xpath
-   * and patches the window before any page script runs.
-   */
-  xpath?: boolean
 }
 
 export type EvaluateError =
@@ -153,6 +147,21 @@ interface XPathCapableWindow {
 // 3. Real browsers expose a global `XPathEvaluator` constructor — the
 //    interface `Document` implements, but also usable standalone. wgxpath
 //    only patches `document`, so synthesize the constructor from it.
+//
+// Applied to every window unconditionally, like patchBuiltins() — XPath is
+// standard in every real browser, so a page that uses it should just work.
+// It's called from setupWindow() rather than layered on via `inject` because
+// htmx constructs its XPathEvaluator at script-parse time: injects run after
+// embedded `<script src>` tags have already been extracted and evaluated, so
+// they'd be too late. setupWindow() covers embedded scripts, injects and user
+// code alike, matching the browser guarantee that window.XPathEvaluator
+// exists before any page script runs.
+//
+// wgxpath.install() guards internally with `if (!d.evaluate || force)`, so it
+// already defers to a native document.evaluate should happy-dom ever ship
+// one. The wrappers below don't guard, though: a happy-dom that implemented
+// `evaluate` but not `createExpression` would throw here on every run. Narrow,
+// but this is on the hot path for every invocation now.
 function installXPath(window: object): void {
   const win = window as XPathCapableWindow
   // wgxpath.install(target) also sets `target.XPathResult` as a side effect —
@@ -264,7 +273,7 @@ export async function evaluate(
   const setupWindow = (w: object): void => {
     patchBuiltins(w)
     captureConsole(w as never, logs, !!opts.quietConsole)
-    if (opts.xpath) installXPath(w)
+    installXPath(w)
   }
 
   const settings: Record<string, unknown> = {

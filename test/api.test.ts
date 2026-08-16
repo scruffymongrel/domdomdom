@@ -2,7 +2,8 @@ import { test, expect, describe } from 'bun:test'
 import { resolve } from 'node:path'
 import { evaluate, toCloneable } from '../index.ts'
 
-const fixture = (name: string): string => resolve(import.meta.dir, 'fixtures', name)
+const fixtureDir = resolve(import.meta.dir, 'fixtures')
+const fixture = (name: string): string => resolve(fixtureDir, name)
 
 describe('evaluate()', () => {
   test('returns expression result', async () => {
@@ -125,6 +126,57 @@ describe('evaluate()', () => {
       { html: '<title>still-works</title><script src="./does-not-exist.js"></script>' },
     )
     expect(r.ok && r.result).toBe('still-works')
+  })
+
+  // Script extraction matches raw text, not a parsed DOM, so it has to respect
+  // HTML comments in both directions: don't run what's commented out, and don't
+  // treat `<!--` inside a script body as a comment.
+  describe('commented-out scripts', () => {
+    test('a commented-out <script src> is not fetched or executed', async () => {
+      const r = await evaluate('return typeof window.PRELOADED', {
+        html: '<!-- disabled: <script src="./preload.js"></script> -->',
+        baseDir: fixtureDir,
+      })
+      expect(r.ok && r.result).toBe('undefined')
+    })
+
+    test('a comment mentioning a script tag does not swallow the real one after it', async () => {
+      // The unclosed `<script src>` in prose used to pair with the *real* tag's
+      // `</script>`, consuming it so the real script never ran.
+      const r = await evaluate('return typeof window.PRELOADED', {
+        html: '<!-- load it with <script src> like so -->'
+          + '<script src="./preload.js"></script>',
+        baseDir: fixtureDir,
+      })
+      expect(r.ok && r.result).toBe('string')
+    })
+
+    test('an unterminated comment swallows the rest of the document', async () => {
+      const r = await evaluate('return typeof window.PRELOADED', {
+        html: '<!-- oops <script src="./preload.js"></script>',
+        baseDir: fixtureDir,
+      })
+      expect(r.ok && r.result).toBe('undefined')
+    })
+
+    test('`<!--` inside an attribute value does not hide a later script', async () => {
+      // Comments only open in text context. Treating this as one would swallow
+      // the rest of the document, dropping the bundle back to happy-dom's
+      // wrapped-script path where top-level `var` never reaches window.
+      const r = await evaluate('return window.bundleResult', {
+        html: '<div title="<!--"></div><script src="./iife-bundle.js"></script>',
+        baseDir: fixtureDir,
+      })
+      expect(r.ok && r.result).toEqual({ ok: true, version: '1.0.0' })
+    })
+
+    test('`<!--` inside a script body does not start a comment', async () => {
+      // The reverse case, and why masking comments up front isn't enough.
+      const r = await evaluate('return window.marker', {
+        html: '<script>/* <!-- */ window.marker = "ran"</script>',
+      })
+      expect(r.ok && r.result).toBe('ran')
+    })
   })
 
   test('console.log with BigInt (JSON.stringify throws → String fallback)', async () => {

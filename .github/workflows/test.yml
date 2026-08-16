@@ -16,3 +16,19 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - run: bun run quality
+
+  # The suite above runs under Bun only, but Node is a supported runtime
+  # (engines.node >=23.6) and ships the same .ts bin. Without this, a Node-only
+  # break would only surface at release time — or for a user.
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: bun install --frozen-lockfile
+      - run: bun run smoke:node

@@ -1,6 +1,7 @@
 import { Browser } from 'happy-dom'
 import { resolve, dirname } from 'node:path'
 import { readFileSync } from 'node:fs'
+import wgxpath from 'wicked-good-xpath'
 
 export type ConsoleLevel = 'log' | 'warn' | 'error' | 'info' | 'debug'
 
@@ -50,6 +51,38 @@ const TYPE_MODULE_RE = /\btype=["']module["']/i
 const ABS_URL_RE = /^(https?:)?\/\//i
 const LOCAL_HOST = 'http://__domdomdom_local__'
 
+// Is the `<!--` at `i` a real comment opener, or just those characters sitting
+// inside a tag (e.g. `<div title="<!--">`)? Comments only open in text context,
+// so if the nearest `<` before `i` is later than the nearest `>`, we're still
+// inside a tag and this isn't a comment. A heuristic — it can be fooled by a
+// quoted `>` in an attribute value — but it costs two indexOf calls and keeps
+// stray `<!--` in markup from swallowing the scripts that follow it.
+function opensComment(html: string, i: number): boolean {
+  // Start of document is text context. Guarded explicitly because
+  // lastIndexOf(c, -1) clamps the search to index 0 rather than finding nothing.
+  if (i === 0) return true
+  return html.lastIndexOf('<', i - 1) <= html.lastIndexOf('>', i - 1)
+}
+
+// Decide what to do with one matched <script> tag: return '' to extract it
+// (its content goes into `scripts` to be run via page.evaluate()), or the tag
+// unchanged to leave it in the HTML for happy-dom to handle.
+function takeScript(match: string, attrs: string, baseDir: string, scripts: PendingScript[]): string {
+  if (TYPE_MODULE_RE.test(attrs)) return match
+  const srcMatch = SRC_ATTR_RE.exec(attrs)
+  if (!srcMatch) return match
+  const src = srcMatch[1]!
+  if (ABS_URL_RE.test(src)) return match
+  try {
+    const file = resolve(baseDir, src)
+    scripts.push({ src, content: readFileSync(file, 'utf8') })
+    return ''
+  } catch {
+    process.stderr.write(`[domdomdom] could not read ${src}\n`)
+    return match
+  }
+}
+
 // Pull `<script src>` tags out of the HTML so we can run their contents via
 // page.evaluate() (Script.runInContext) instead of letting happy-dom's HTML
 // parser wrap them in `function anonymous(...)` — that wrapper makes top-level
@@ -57,27 +90,48 @@ const LOCAL_HOST = 'http://__domdomdom_local__'
 // IIFE bundles. Module scripts are left alone: they have their own scope and
 // happy-dom handles them via its module loader (paired with the virtual server
 // in evaluate() so http(s) imports map onto the file system).
+//
+// We scan rather than a single .replace() because this matches on raw text, not
+// a parsed DOM, and has to respect HTML comments: a commented-out
+// `<!-- <script src="./x.js"></script> -->` must NOT be extracted and run (real
+// browsers never load it), and prose inside a comment that merely mentions a
+// script tag must not swallow the real tag that follows it. Masking comments out
+// up front would be simpler but breaks the reverse case — `<!--` is legal inside
+// a script body, where it must not start a comment. So walk left to right and
+// let whichever construct opens first consume its own span.
 function extractLocalScripts(
   html: string,
   baseDir: string,
 ): { html: string; scripts: PendingScript[] } {
   const scripts: PendingScript[] = []
-  const stripped = html.replace(SCRIPT_TAG_RE, (match, attrs: string) => {
-    if (TYPE_MODULE_RE.test(attrs)) return match
-    const srcMatch = SRC_ATTR_RE.exec(attrs)
-    if (!srcMatch) return match
-    const src = srcMatch[1]!
-    if (ABS_URL_RE.test(src)) return match
-    try {
-      const file = resolve(baseDir, src)
-      scripts.push({ src, content: readFileSync(file, 'utf8') })
-      return ''
-    } catch {
-      process.stderr.write(`[domdomdom] could not read ${src}\n`)
-      return match
+  let out = ''
+  let pos = 0
+
+  while (pos < html.length) {
+    SCRIPT_TAG_RE.lastIndex = pos
+    const m = SCRIPT_TAG_RE.exec(html)
+    if (!m) break
+
+    let commentAt = html.indexOf('<!--', pos)
+    while (commentAt !== -1 && !opensComment(html, commentAt)) {
+      commentAt = html.indexOf('<!--', commentAt + 4)
     }
-  })
-  return { html: stripped, scripts }
+    if (commentAt !== -1 && commentAt < m.index) {
+      // Comment opens first — copy it through verbatim and don't look inside.
+      // An unterminated comment runs to the end of the document, same as a
+      // browser's parser treats it.
+      const end = html.indexOf('-->', commentAt + 4)
+      const stop = end === -1 ? html.length : end + 3
+      out += html.slice(pos, stop)
+      pos = stop
+      continue
+    }
+
+    out += html.slice(pos, m.index) + takeScript(m[0], m[1]!, baseDir, scripts)
+    pos = m.index + m[0].length
+  }
+
+  return { html: out + html.slice(pos), scripts }
 }
 
 // happy-dom's BrowserWindow on Bun starts with all JS built-ins (Object, Math,
@@ -107,6 +161,95 @@ function patchBuiltins(window: object): void {
     } catch {
       /* read-only, ignore */
     }
+  }
+}
+
+interface XPathCapableWindow {
+  document: {
+    evaluate: (...args: unknown[]) => unknown
+    createExpression: (
+      expression: string,
+      resolver?: unknown,
+    ) => { evaluate: (...args: unknown[]) => unknown }
+    createNSResolver: (node: unknown) => unknown
+  }
+  XPathEvaluator?: unknown
+  XPathResult?: unknown
+}
+
+// happy-dom doesn't implement window.XPathEvaluator / document.evaluate (the
+// DOM Level 3 XPath API). htmx 4 uses `new XPathEvaluator().createExpression(...)`
+// internally (for hx-on attribute matching) and throws ReferenceError without
+// it. wicked-good-xpath (Google's pure-JS XPath 1.0 engine, MIT — formerly
+// powered Selenium-on-IE) polyfills document.evaluate over standard DOM
+// traversal, but needs three adjustments to work against happy-dom:
+//
+// 1. happy-dom's `window.Document` is a distinct synthetic subclass from the
+//    class actually backing `window.document` (`window.document`'s prototype
+//    chain never reaches `window.Document.prototype`). wgxpath.install()
+//    auto-dispatches to `window.Document.prototype` when present, silently
+//    patching the wrong class. Passing a bare `{ document }` shim (no
+//    `.Document` property) starves that branch so it falls through to
+//    patching `document` directly, as an own property — which is what
+//    `window.document` actually uses.
+// 2. wgxpath's XPathExpression#evaluate has no default for its `type` param.
+//    Spec-compliant callers that omit it (relying on the WebIDL `optional
+//    unsigned short type = 0` default, e.g. htmx's `expr.evaluate(node)`) hit
+//    "Unknown XPathResult type." instead of getting auto-detection. Wrap it
+//    to apply that default ourselves.
+// 3. Real browsers expose a global `XPathEvaluator` constructor — the
+//    interface `Document` implements, but also usable standalone. wgxpath
+//    only patches `document`, so synthesize the constructor from it.
+//
+// Applied to every window unconditionally, like patchBuiltins() — XPath is
+// standard in every real browser, so a page that uses it should just work.
+// It's called from setupWindow() rather than layered on via `inject` because
+// htmx constructs its XPathEvaluator at script-parse time: injects run after
+// embedded `<script src>` tags have already been extracted and evaluated, so
+// they'd be too late. setupWindow() covers embedded scripts, injects and user
+// code alike, matching the browser guarantee that window.XPathEvaluator
+// exists before any page script runs.
+//
+// wgxpath.install() guards internally with `if (!d.evaluate || force)`, so it
+// already defers to a native document.evaluate should happy-dom ever ship
+// one. The wrappers below don't guard, though: a happy-dom that implemented
+// `evaluate` but not `createExpression` would throw here on every run. Narrow,
+// but this is on the hot path for every invocation now.
+function installXPath(window: object): void {
+  const win = window as XPathCapableWindow
+  // wgxpath.install(target) also sets `target.XPathResult` as a side effect —
+  // on the real target, not on `win`, since we hand it the `{ document }`
+  // shim rather than `win` itself (see point 1 above). Recover it from there.
+  const shim: { document: XPathCapableWindow['document']; XPathResult?: unknown } = {
+    document: win.document,
+  }
+  wgxpath.install(shim)
+  if (!win.XPathResult) win.XPathResult = shim.XPathResult
+
+  const nativeCreateExpression = win.document.createExpression.bind(win.document)
+  win.document.createExpression = (expression: string, resolver?: unknown) => {
+    const expr = nativeCreateExpression(expression, resolver)
+    const nativeEvaluate = expr.evaluate.bind(expr)
+    expr.evaluate = (...args: unknown[]) => {
+      const [contextNode, type, result] = args
+      return nativeEvaluate(contextNode, type ?? 0, result)
+    }
+    return expr
+  }
+
+  const nativeEvaluate = win.document.evaluate.bind(win.document)
+  win.document.evaluate = (...args: unknown[]) => {
+    const [expression, contextNode, resolver, type, result] = args
+    return nativeEvaluate(expression, contextNode, resolver, type ?? 0, result)
+  }
+
+  if (!win.XPathEvaluator) {
+    function XPathEvaluator(this: unknown): void {}
+    XPathEvaluator.prototype.createExpression = (expression: string, resolver?: unknown) =>
+      win.document.createExpression(expression, resolver)
+    XPathEvaluator.prototype.createNSResolver = (node: unknown) => win.document.createNSResolver(node)
+    XPathEvaluator.prototype.evaluate = (...args: unknown[]) => win.document.evaluate(...args)
+    win.XPathEvaluator = XPathEvaluator
   }
 }
 
@@ -183,6 +326,7 @@ export async function evaluate(
   const setupWindow = (w: object): void => {
     patchBuiltins(w)
     captureConsole(w as never, logs, !!opts.quietConsole)
+    installXPath(w)
   }
 
   const settings: Record<string, unknown> = {

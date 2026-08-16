@@ -14,7 +14,7 @@ happy-dom *almost* works on Bun out of the box. Then you hit four walls. domdomd
 
 1. **Built-ins are missing.** happy-dom's BrowserWindow on Bun starts with `Object`, `Math`, `JSON`, `parseInt`, `SyntaxError` etc. set to `undefined`. Its `VMGlobalPropertyScript` tries to copy them from `globalThis`, but inside `Script.runInContext` `globalThis` refers to the (empty) inner scope. Every `querySelector` throws `TypeError` because `SyntaxError` isn't on `window`. domdomdom enumerates `Object.getOwnPropertyNames(globalThis)` from the host realm and assigns each to the page window.
 2. **`file://` doesn't fetch.** `page.goto('file:///abs/path.html')` rejects. domdomdom reads HTML manually and uses `page.content =` plus `page.url =` to set up the page.
-3. **IIFE bundles silently break.** happy-dom's HTML parser wraps every `<script>` body in `function anonymous($happy_dom) { ... }`. Top-level `var foo = (() => { ... })()` becomes a function-local — never reaches `window`. domdomdom extracts `<script src>` tags before `page.content` and runs them via `page.evaluate()` (uses `Script.runInContext` directly, preserves real script-top-level scope).
+3. **IIFE bundles silently break.** happy-dom's HTML parser wraps every `<script>` body in `function anonymous($happy_dom) { ... }`. Top-level `var foo = (() => { ... })()` becomes a function-local — never reaches `window`. domdomdom extracts `<script src>` tags before `page.content` and runs them via `page.evaluate()` (uses `Script.runInContext` directly, preserves real script-top-level scope). That extraction works on raw text rather than a parsed DOM, so it skips over HTML comments explicitly — a commented-out `<script src>` is left alone rather than fetched and executed.
 4. **ES modules can't import.** `<script type="module" src="./foo.js">` can't be fetched from disk. domdomdom maps a synthetic `http://` origin to the page directory via happy-dom's `virtualServers` so relative imports work.
 
 Each of these is a one-line fix once you've found it. Finding them took an afternoon.
@@ -216,14 +216,47 @@ Layout, screenshots, click/scroll interaction, or untrusted-code isolation. Use 
 - **Source maps.** Stack traces refer to evaluated-script offsets, not your original `.ts` files.
 - **`outerHTML` round-trips drop reactive inline styles.** If a custom element sets inline styles in `attributeChangedCallback` (e.g. `this.style.display = 'grid'`), assigning `outerHTML` can clobber pre-existing inline styles in the markup. Real browsers preserve them. Don't trust `el.style.getPropertyValue(...)` after a happy-dom `outerHTML` round-trip if the SUT has reactive style assignments.
 
+## XPath support
+
+happy-dom doesn't implement the DOM XPath API (`document.evaluate`, `window.XPathEvaluator`) — a real gap, since it's standard in every browser. This surfaced concretely: htmx 4 uses `new XPathEvaluator().createExpression(...)` internally for `hx-on` attribute matching, so without a polyfill domdomdom can't execute an htmx-4 page at all (`ReferenceError: XPathEvaluator is not defined`).
+
+domdomdom polyfills it with [wicked-good-xpath](https://github.com/google/wicked-good-xpath) (Google's pure-JS XPath 1.0 engine, MIT — formerly powered Selenium-on-IE), patched for three happy-dom-specific quirks; see `installXPath()` in `index.ts` for the details. **No flag needed** — it's installed on every window before any page script runs, the same way missing JS built-ins are, because a page that uses XPath should just work.
+
+```sh
+echo 'return document.evaluate("//td[2]", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue.textContent' \
+  | domdomdom --html '<table><tr><td>a</td><td>b</td></tr></table>'
+# b
+```
+
+Covers DOM XPath 1.0 (`document.evaluate`, `createExpression`, `createNSResolver`, the `XPathEvaluator` constructor, `XPathResult` type constants). No XPath 2.0+ (sequences, `for`/`let`, richer type system) — wicked-good-xpath doesn't implement it and nothing found in htmx 4 needs it.
+
 ## Development
 
 ```sh
 bun install
-bun test            # 60 tests, 100% line + function coverage on engine and CLI
+bun test            # coverage runs and is gated by bunfig.toml
 bun run typecheck   # tsc --noEmit
 bun run quality     # both
+bun run smoke:node  # runs the shipped .ts bin under Node
 ```
+
+Coverage is **enforced**, not just reported: `bunfig.toml` sets `coverageThreshold = { lines = 1.0, functions = 1.0 }`, so `bun test` (and therefore CI) fails if line or function coverage on `index.ts` / `cli.ts` drops below 100%. Note the keys are plural — bun silently ignores `line`/`function`, which gates nothing.
+
+The test suite runs under Bun only, but Node is a supported runtime, so `smoke:node` drives the shipped CLI under Node as a separate CI job.
+
+## Releasing
+
+Releases are fully automated — there are no manual steps and no npm token.
+
+```sh
+gh workflow run release.yml -f bump=patch|minor|major
+```
+
+CI runs the quality gate and Node smoke test, then bumps the version, commits, tags, pushes and publishes to npm via [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC), with provenance attestation. It refuses to run anywhere but `main`.
+
+The same run fast-forwards the `release` branch, which is the Claude Code plugin channel — the marketplace pins `ref: release`, so the plugin ships when npm does, with no separate step.
+
+Don't bump `version` in `package.json` by hand — CI owns it, and a manual bump double-bumps. Don't rename `.github/workflows/release.yml` either; npm's trusted publisher is keyed to the repo *and* the workflow filename.
 
 ## License
 

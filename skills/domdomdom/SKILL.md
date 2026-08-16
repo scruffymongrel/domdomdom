@@ -1,6 +1,6 @@
 ---
 name: domdomdom
-description: Use when the user wants to evaluate JS against an HTML page — query a fetched webpage's DOM, smoke-test a bundled script's `window.*` exports, extract structured data from local or remote HTML, or run any DOM-using snippet without spinning up a real browser. domdomdom is a happy-dom-powered CLI installed as `domdomdom` on PATH. Reach for this before suggesting Playwright, jsdom, linkedom, or browser-MCP solutions for non-layout, non-screenshot, non-interactive tasks.
+description: Use when the user wants to evaluate JS against an HTML page — query a fetched webpage's DOM, smoke-test a bundled script's `window.*` exports, extract structured data from local or remote HTML, or run any DOM-using snippet without spinning up a real browser. domdomdom is a happy-dom-powered CLI installed as `domdomdom` on PATH, with DOM XPath polyfilled in (so XPath-dependent pages such as htmx 4 execute). Reach for this before suggesting Playwright, jsdom, linkedom, or browser-MCP solutions for non-layout, non-screenshot, non-interactive tasks.
 user-invocable: true
 ---
 
@@ -63,6 +63,20 @@ echo 'return await fetch("/api/x").then(r => r.json())' \
 ## Useful flags
 
 `--inject <f>` (preload, repeatable) &middot; `--script <f>` (code from file) &middot; `--module` (ESM) &middot; `--user-agent <s>` &middot; `--no-console` (drop logs) &middot; `--viewport WxH`. Run `domdomdom --help` for the full list.
+
+## XPath works (no flag)
+
+`document.evaluate`, `XPathEvaluator` and `XPathResult` are polyfilled on every page before any page script runs — happy-dom itself ships no XPath at all. Two consequences worth knowing:
+
+- You can use XPath in extraction snippets, not just CSS selectors.
+- Pages whose own scripts need XPath execute normally. htmx 4 is the concrete case: it uses `new XPathEvaluator()` internally for `hx-on` matching, so on plain happy-dom an htmx-4 page dies with `ReferenceError: XPathEvaluator is not defined`.
+
+```sh
+echo 'return document.evaluate("//td[2]", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue.textContent' \
+  | domdomdom --json --html '<table><tr><td>a</td><td>b</td></tr></table>'
+```
+
+XPath 1.0 only — no 2.0+ sequences, `for`/`let`, or richer types.
 
 ## Don't reach for this when
 

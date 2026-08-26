@@ -1,6 +1,8 @@
 import { test, expect, describe } from 'bun:test'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dir, '..')
 const read = (p: string): Record<string, unknown> =>
@@ -45,10 +47,10 @@ describe('packaging', () => {
     })
   })
 
-  // The plugin cache is a git clone of the `release` branch with dist/
-  // gitignored, so installing the plugin never puts `domdomdom` on PATH. The
-  // skill has to say how to install the CLI or it will tell an agent to run a
-  // command that does not exist.
+  // The plugin cache is a git clone of the built `release` branch, which ships
+  // the skill and the manifest and no binary, so installing the plugin never
+  // puts `domdomdom` on PATH. The skill has to say how to install the CLI or it
+  // will tell an agent to run a command that does not exist.
   test('the skill documents how to install the binary', () => {
     const skill = readFileSync(resolve(root, 'skills/domdomdom/SKILL.md'), 'utf8')
     expect(skill).toContain('npm i -g domdomdom')
@@ -69,5 +71,133 @@ describe('packaging', () => {
     expect(readme).toContain('/plugin update')
     expect(readme).toContain('npm i -g domdomdom@latest')
     expect(readme).toMatch(/only \*after\* `npm publish` succeeds/)
+  })
+})
+
+// The plugin distribution channel — the `release` branch — is *built*, not
+// fast-forwarded from main. Claude Code runs a dependency install in a plugin
+// root that holds both a package.json and a supported lockfile (bun.lock ->
+// `bun install --frozen-lockfile --ignore-scripts`), and the old
+// `git push origin HEAD:release` shipped both, so every plugin install
+// materialised ~46-50MB of node_modules — for a plugin with no hooks and no MCP
+// servers, i.e. nothing that could ever load them.
+//
+// These tests are the guard on exactly that. If the built tree ever regains a
+// package.json or a lockfile, the waste is back and this fails.
+describe('plugin release channel', () => {
+  const script = resolve(root, 'scripts/build-plugin-channel.mjs')
+  const expected = ['.claude-plugin/plugin.json', 'LICENSE', 'README.md', 'skills/thing/SKILL.md']
+  const LOCKFILES = /(^|\/)(bun\.lock|bun\.lockb|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml)$/
+
+  const git = (cwd: string, ...args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf8' }).trimEnd()
+
+  // A throwaway repo shaped like this one: the four channel paths, plus the dev
+  // tree the channel must leave behind.
+  const fixture = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'plugin-channel-'))
+    const write = (path: string, body: string): void => {
+      mkdirSync(dirname(join(dir, path)), { recursive: true })
+      writeFileSync(join(dir, path), body)
+    }
+    write('.claude-plugin/plugin.json', '{"name":"thing","version":"9.9.9"}\n')
+    write('skills/thing/SKILL.md', '# skill\n')
+    write('README.md', '# readme\n')
+    write('LICENSE', 'MIT\n')
+    write('package.json', '{"name":"thing","version":"9.9.9"}\n')
+    write('bun.lock', '{}\n')
+    write('AGENTS.md', '# agents\n')
+    write('index.ts', 'export {}\n')
+    write('tsconfig.json', '{}\n')
+    write('test/thing.test.ts', 'export {}\n')
+    write('scripts/build.mjs', '// build\n')
+    write('.github/workflows/release.yml', 'name: release\n')
+    git(dir, 'init', '--quiet', '--initial-branch=main')
+    git(dir, 'add', '-A')
+    git(dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'init')
+    return dir
+  }
+
+  const build = (cwd: string): string =>
+    execFileSync('bun', [script], {
+      cwd,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 't',
+        GIT_AUTHOR_EMAIL: 't@t',
+        GIT_COMMITTER_NAME: 't',
+        GIT_COMMITTER_EMAIL: 't@t',
+      },
+    })
+
+  const withFixture = (fn: (dir: string) => void): void => {
+    const dir = fixture()
+    try {
+      fn(dir)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  test('the built tree holds the channel paths and nothing else', () => {
+    withFixture(dir => {
+      build(dir)
+      const files = git(dir, 'ls-tree', '-r', '--name-only', 'release').split('\n')
+      expect([...files].sort()).toEqual([...expected].sort())
+    })
+  })
+
+  // Named separately from the exact-tree assertion above because this is the
+  // reason the whole script exists: no manifest, no lockfile, no install.
+  test('the built tree has no package.json and no lockfile', () => {
+    withFixture(dir => {
+      build(dir)
+      const files = git(dir, 'ls-tree', '-r', '--name-only', 'release').split('\n')
+      expect(files.filter(f => f === 'package.json' || LOCKFILES.test(f))).toEqual([])
+    })
+  })
+
+  test('the channel commit names the released version', () => {
+    withFixture(dir => {
+      build(dir)
+      expect(git(dir, 'log', '-1', '--format=%s', 'release')).toBe('chore(plugin): v9.9.9')
+    })
+  })
+
+  test('creates the channel as an orphan when the branch does not exist yet', () => {
+    withFixture(dir => {
+      build(dir)
+      expect(git(dir, 'rev-list', '--count', 'release')).toBe('1')
+      expect(git(dir, 'log', '-1', '--format=%P', 'release')).toBe('')
+    })
+  })
+
+  test('extends an existing channel, so the push never needs --force', () => {
+    withFixture(dir => {
+      // The channel as it was before this change: a fast-forward of main.
+      const before = git(dir, 'rev-parse', 'HEAD')
+      git(dir, 'branch', 'release', before)
+
+      build(dir)
+      expect(git(dir, 'log', '-1', '--format=%P', 'release')).toBe(before)
+      // Throws if the old tip isn't an ancestor — i.e. if a push would be rejected.
+      git(dir, 'merge-base', '--is-ancestor', before, 'release')
+
+      // Rerunnable: a second run is a valid child of the first, same tree.
+      const first = git(dir, 'rev-parse', 'release')
+      build(dir)
+      expect(git(dir, 'log', '-1', '--format=%P', 'release')).toBe(first)
+      expect(git(dir, 'rev-parse', 'release^{tree}')).toBe(git(dir, 'rev-parse', `${first}^{tree}`))
+    })
+  })
+
+  test('the release workflow builds the channel instead of fast-forwarding main', () => {
+    const workflow = readFileSync(resolve(root, '.github/workflows/release.yml'), 'utf8')
+    expect(workflow).toContain('bun scripts/build-plugin-channel.mjs')
+    expect(workflow).not.toContain('HEAD:release')
+    // Still after the publish: the channel must never point at a version that
+    // isn't on npm.
+    expect(workflow.indexOf('npm publish')).toBeLessThan(workflow.indexOf('build-plugin-channel'))
   })
 })

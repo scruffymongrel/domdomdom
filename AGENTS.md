@@ -16,7 +16,8 @@ gh run watch
 
 CI then runs: quality gate → Node smoke test → packed-tarball smoke test →
 `npm version` (bump + `chore(release): vX.Y.Z` commit + annotated tag) → push →
-`npm publish` via Trusted Publishing (OIDC).
+`npm publish` via Trusted Publishing (OIDC) → build the plugin channel and
+advance `release`.
 
 **`release.yml` and `test.yml` must gate on the same checks.** A release that
 can fail on a step PR CI never ran is a release that breaks at the worst moment
@@ -38,20 +39,52 @@ Invariants — these are the ways to get it wrong:
   Claude Code uses to decide whether a plugin update is available. If it stops
   changing, `/plugin update` silently skips the plugin and users stay on an old
   build no matter what else moves.
-- **The `release` branch is the plugin channel.** `scruffymongrel/claude-plugins`
-  pins `ref: release`, and the release workflow fast-forwards it after a
-  successful publish. Don't push to it by hand — that would ship plugin content
-  for a version that isn't on npm.
+- **The `release` branch is the plugin channel, and it is *built*, not
+  fast-forwarded.** `scruffymongrel/claude-plugins` pins `ref: release`, and
+  after a successful publish the workflow runs
+  `scripts/build-plugin-channel.mjs` and pushes the result. Don't push to it by
+  hand — that would ship plugin content for a version that isn't on npm.
+
+  The script assembles a tree with git plumbing (`ls-tree` → `mktree` →
+  `commit-tree`) containing **exactly** `.claude-plugin/`, `skills/`,
+  `README.md` and `LICENSE`, and commits it as a child of the current channel
+  tip. A child, not a rewrite: the push stays an ordinary fast-forward, so
+  nothing ever needs `--force`, and the channel keeps a linear history of its
+  own. It shares no history with `main` — the commit body records the source
+  commit if you need to tie them together. If `release` doesn't exist (a fresh
+  fork), the first commit is an orphan.
+- **The plugin channel ships no `package.json` and no lockfile, deliberately.**
+  Claude Code runs a dependency install in a plugin's root when it finds *both*
+  a `package.json` and a supported lockfile — `bun.lock`/`bun.lockb` →
+  `bun install --frozen-lockfile --ignore-scripts`, `package-lock.json`/
+  `npm-shrinkwrap.json` → `npm ci --ignore-scripts`. With a `package.json` and
+  no lockfile it is skipped, silently, with no log entry.
+
+  The old channel was `git push origin HEAD:release`, so it carried the whole
+  dev tree including `bun.lock`, and every single plugin install materialised
+  ~46-50MB of `node_modules`. Those deps exist so a plugin's hooks and MCP
+  servers can load them. **This plugin ships skills only — no hooks, no MCP
+  servers** — so not one byte of it was ever loadable. `.claude-plugin/` is the
+  only file a plugin actually requires; nothing requires a `package.json`, and
+  nothing requires the channel `ref` to share history with the default branch.
+
+  Dropping the manifest rather than only the lockfile is the point: with no
+  `package.json` in the tree, a future maintainer cannot silently reintroduce
+  the install by restoring a lockfile. `test/packaging.test.ts` builds the
+  channel in a throwaway repo and asserts the exact path set plus the absence of
+  a `package.json` and any lockfile. **Don't "restore" the dev tree** — the
+  files it would add (`cli.ts`, `index.ts`, `test/`, `scripts/`, tsconfigs,
+  `AGENTS.md`) are read by nobody in the plugin cache and one of them costs 46MB
+  per user.
 - **The plugin channel and the npm channel ship different content, on
   purpose.** The plugin cache
   (`~/.claude/plugins/cache/scruffymongrel/domdomdom/<version>/`) is a git
-  clone of the `release` branch. `dist/` is gitignored, so that clone has
-  source (`.ts`), `skills/`, and `.claude-plugin/` — never a built binary. The
-  npm tarball is the mirror image: `files:` in `package.json` ships `dist/`
-  (built at pack time via `prepack`) plus the plugin manifest, not the raw
-  `.ts`. Two channels, one repo, deliberately asymmetric — the plugin's only
-  job is delivering the skill (and the source, for reference), not making
-  `domdomdom` runnable on its own.
+  clone of the built `release` branch: the manifest and the skill, and never a
+  built binary — `dist/` is gitignored and isn't in the channel tree either
+  way. The npm tarball is the mirror image: `files:` in `package.json` ships
+  `dist/` (built at pack time via `prepack`) plus the plugin manifest, not the
+  raw `.ts`. Two channels, one repo, deliberately asymmetric — the plugin's
+  only job is delivering the skill, not making `domdomdom` runnable on its own.
 
   This is a trap for a future agent: seeing "the plugin has no `dist/`" reads
   like a packaging bug, and the obvious "fix" — un-gitignore `dist/`, or add

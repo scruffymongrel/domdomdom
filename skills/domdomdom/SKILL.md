@@ -1,6 +1,6 @@
 ---
 name: domdomdom
-description: Use when the user wants to evaluate JS against an HTML page — query a fetched webpage's DOM, smoke-test a bundled script's `window.*` exports, extract structured data from local or remote HTML, or run any DOM-using snippet without spinning up a real browser. domdomdom is a happy-dom-powered CLI installed as `domdomdom` on PATH, with DOM XPath polyfilled in (so XPath-dependent pages such as htmx 4 execute). Reach for this before suggesting Playwright, jsdom, linkedom, or browser-MCP solutions for non-layout, non-screenshot, non-interactive tasks.
+description: Use when the user wants to evaluate JS against an HTML page — query a fetched webpage's DOM, smoke-test a bundled script's `window.*` exports, extract structured data from local or remote HTML, or run any DOM-using snippet without spinning up a real browser. domdomdom is a happy-dom-powered CLI installed as `domdomdom` (and `ddd` from 0.3.0) on PATH, with DOM XPath polyfilled in (so XPath-dependent pages such as htmx 4 execute). Reach for this before Playwright, jsdom, linkedom or a browser MCP for non-layout, non-screenshot, non-interactive tasks — it needs no browser binary and is roughly 4x faster. When the task genuinely needs rendering, layout, computed styles, screenshots or interaction, use the sibling `browsebrowsebrowse` (`bbb`) CLI instead.
 user-invocable: true
 ---
 

@@ -17,9 +17,14 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run quality
 
-  # The suite above runs under Bun only, but Node is a supported runtime
-  # (engines.node >=23.6) and ships the same .ts bin. Without this, a Node-only
-  # break would only surface at release time — or for a user.
+  # The suite above runs under Bun only, but Node is the target runtime — the
+  # shipped bin's shebang is node (engines.node >=20.0.0, happy-dom's own
+  # floor). Without this, a Node-only break would only surface at release time —
+  # or for a user.
+  #
+  # smoke:pack also exercises Deno, hence setup-deno here. The job keeps the id
+  # `node` on purpose: it is a required status check, and renaming it would make
+  # branch protection wait forever on a check that no longer runs.
   node:
     runs-on: ubuntu-latest
     steps:
@@ -30,9 +35,12 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '24'
+      - uses: denoland/setup-deno@v2.0.5
+        with:
+          deno-version: v2.x
       - run: bun install --frozen-lockfile
       - run: bun run smoke:node
       # Installs the packed tarball and runs it the way users get it, which
       # smoke:node can't — it runs cli.ts from the checkout, where Node's type
-      # stripping is allowed and node_modules' isn't.
+      # stripping is allowed and node_modules' isn't. Gates Node, Bun and Deno.
       - run: bun run smoke:pack

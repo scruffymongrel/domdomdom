@@ -14,9 +14,14 @@ gh workflow run release.yml -f bump=patch|minor|major
 gh run watch
 ```
 
-CI then runs: quality gate → Node smoke test → `npm version` (bump +
-`chore(release): vX.Y.Z` commit + annotated tag) → push → `npm publish` via
-Trusted Publishing (OIDC).
+CI then runs: quality gate → Node smoke test → packed-tarball smoke test →
+`npm version` (bump + `chore(release): vX.Y.Z` commit + annotated tag) → push →
+`npm publish` via Trusted Publishing (OIDC).
+
+**`release.yml` and `test.yml` must gate on the same checks.** A release that
+can fail on a step PR CI never ran is a release that breaks at the worst moment
+— the sibling repo learned that the hard way. Add a gate to one, add it to the
+other.
 
 Invariants — these are the ways to get it wrong:
 
@@ -84,7 +89,7 @@ of the automation is that the bump, tag and publish are inseparable.
 ```sh
 bun run quality      # tsc --noEmit + bun test (coverage gated, see bunfig.toml)
 bun run smoke:node   # runs the CLI from the checkout under Node
-bun run smoke:pack   # packs, installs the tarball, runs it under Node AND Bun
+bun run smoke:pack   # packs, installs the tarball, runs it under Node, Bun AND Deno
 bun run build        # compile dist/ (runs automatically via prepack)
 ```
 
@@ -96,18 +101,41 @@ bun run build        # compile dist/ (runs automatically via prepack)
   Scripts run under `bun`, the build shells out to `bunx tsc`, and packing uses
   `bun pm pack` / `bun add` rather than npm. Node is a *target* runtime, not a
   build dependency.
-- **Node is a supported runtime** (`engines.node >=20`) but `bun:test` can only
-  exercise Bun. The Node-executing checks skip with a notice when Node isn't
-  installed — but they hard-fail instead when `CI` is set, so a broken
-  `setup-node` can't masquerade as a pass. Anything touching module resolution,
-  the bin, or a dependency's packaging needs these to stay honest; both run in
-  PR CI.
+- **One runtime story, and it is true.** `engines` claims `node >=20.0.0` and
+  nothing else — that is happy-dom's own floor, asserted against its
+  `package.json` by a test — and the shipped shebang is
+  `#!/usr/bin/env -S node`. That is the honest scope of the shebang, which is
+  the only thing the package controls.
+
+  Three runtimes execute the built CLI and `smoke:pack` gates all three: Node
+  through the shebang, Bun through its own loader (`bunx domdomdom`), and Deno
+  through `deno run -A` (`deno install -g` writes its own `/bin/sh` shim that
+  execs `deno run npm:domdomdom`, so the shebang is never consulted there
+  either). Running under a runtime is not the same as `engines` claiming it: a
+  Bun-only box with no Node on PATH cannot execute the installed bin
+  *directly*, `bunx` is the answer there, and `engines` must not pretend
+  otherwise. Don't add a `bun` or `deno` key to `engines`; a test asserts `node`
+  is the only one.
+
+  **Don't bring back the polyglot shebang.** Through v0.2.0 the build wrote an
+  sh/JS polyglot that re-exec'd into `command -v bun || command -v node`, so a
+  Bun-only box could run the bin directly. It reads as strictly more capable and
+  it isn't: the same tarball, invoked the same way, ran under Bun on a machine
+  with both runtimes and under Node on a Node-only one, silently. A bug that
+  only reproduces on one of your users' machines, with no flag in the command to
+  point at it. `bunx` covers the box it was for.
+- **`bun:test` can only exercise Bun**, so the Node- and Deno-executing checks
+  are scripts, not tests. They skip with a notice when that runtime isn't
+  installed — but hard-fail instead when `CI` is set, so a broken `setup-node`
+  or `setup-deno` can't masquerade as a pass. Anything touching module
+  resolution, the bin, or a dependency's packaging needs these to stay honest;
+  both run in PR CI.
 - **Test the artifact, not the checkout.** `smoke:node` runs the CLI from the
   repo, where Node's type stripping is permitted; that difference hid a bug
   that shipped three times — Node refuses to strip types under `node_modules`,
   so the `.ts` bin threw on every npm+Node install from v0.1.0 to v0.2.0 with CI
   green throughout. The package now ships compiled JS, and `smoke:pack`
-  installs the real tarball and gates on both runtimes. When you change
+  installs the real tarball and gates on all three runtimes. When you change
   anything about packaging, trust `smoke:pack` and nothing else.
 - **`dist/` is built, gitignored, and never hand-edited.** `prepack` builds it,
   so `npm pack` and `npm publish` always compile fresh. Source stays `.ts`.

@@ -43,23 +43,36 @@ domdomdom is significantly cheaper than a real browser when both would work: no 
 # global install
 bun add -g domdomdom
 npm install -g domdomdom
+deno install -g -A npm:domdomdom
 
 # one-off, no install
 bunx domdomdom ./page.html
 npx domdomdom https://example.com
+deno run -A npm:domdomdom https://example.com
 
 # clone for development
 git clone https://github.com/scruffymongrel/domdomdom && cd domdomdom && bun link
 ```
 
-### Runtime requirements
+### Runtimes
 
-- **Bun** ≥ 1.3
-- **Node** ≥ 20 (both current LTS lines included)
+The repo is TypeScript; the published package ships compiled ESM built at pack time. Three runtimes execute it, each with its own way in, and all three are gated by `bun run smoke:pack` in CI.
 
-The repo is TypeScript; the published package ships compiled JS built at pack time, so both runtimes run it as installed with no flags.
+| Runtime | Install | Run |
+| ------- | ------- | --- |
+| **Node ≥ 20** | `npm i -g domdomdom` | `domdomdom …` / `ddd …` — the shipped bin's shebang is `#!/usr/bin/env -S node`, so this is the shebang path |
+| **Bun** | `bun add -g domdomdom` | `bunx domdomdom …` — Bun's loader runs the file directly and never reads the shebang |
+| **Deno ≥ 2** | `deno install -g -A npm:domdomdom` | `deno run -A npm:domdomdom …` |
 
-Through v0.2.0 the package shipped `.ts` source directly and claimed both runtimes executed it natively. They didn't: Node refuses to strip types for files under `node_modules`, so `npm i domdomdom` followed by running it under Node threw `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` — broken since the first release, and invisible to CI because the tests ran the source from a checkout. Compiling also let the Node floor drop from 23.6 (a type-stripping artifact) to happy-dom's actual floor of 20.
+`engines` claims **`node >=20.0.0` and nothing else** — happy-dom's own floor, asserted against its `package.json` by a test so the claim can't drift. That is deliberate: the shebang is the only thing the package controls, and it can only guarantee Node.
+
+One real gap follows from that. On a **Bun-only machine with no Node on `PATH`**, `bun add -g domdomdom` puts `domdomdom` on `PATH` but running it *directly* fails — the OS resolves the shebang's interpreter before Bun gets a say. Use `bunx domdomdom …` there; it bypasses the shebang entirely and is covered by CI.
+
+Deno needs neither Node nor the shebang: `deno install -g` writes its own `#!/bin/sh` shim that execs `deno run -A npm:domdomdom`, so the package's shebang is never consulted. It installs one command per invocation, named after the package; for the short alias use `deno install -g -A --name ddd npm:domdomdom` (both bins are the same file).
+
+Through v0.2.0 the package shipped `.ts` source directly and claimed both runtimes executed it natively. They didn't: Node refuses to strip types for files under `node_modules`, so `npm i domdomdom` followed by running it under Node threw `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` — broken since the first release, and invisible to CI because the tests ran the source from a checkout. Deno refuses for the same reason. Compiling fixed all of it, let the Node floor drop from 23.6 (a type-stripping artifact) to happy-dom's actual floor of 20, and is what makes Deno work at all.
+
+v0.2.0 also shipped an sh/JS polyglot shebang that re-exec'd into `command -v bun || command -v node`, so a Bun-only box could run the bin directly. It was dropped: the same tarball, invoked the same way, ran under Bun on a machine with both runtimes and under Node on a Node-only one, silently. One shebang, one runtime, one thing to debug — and `bunx` covers the box the polyglot was for.
 
 ## CLI
 
@@ -247,16 +260,16 @@ bun run typecheck   # tsc --noEmit
 bun run quality     # both
 bun run build       # compile dist/ (also runs automatically via prepack)
 bun run smoke:node  # run the CLI from the checkout under Node
-bun run smoke:pack  # pack, install the tarball, run it under Node AND Bun
+bun run smoke:pack  # pack, install the tarball, run it under Node, Bun AND Deno
 ```
 
 Coverage is **enforced**, not just reported: `bunfig.toml` sets `coverageThreshold = { lines = 1.0, functions = 1.0 }`, so `bun test` (and therefore CI) fails if line or function coverage on `index.ts` / `cli.ts` drops below 100%. Note the keys are plural — bun silently ignores `line`/`function`, which gates nothing.
 
 The test suite runs under Bun only, but Node is a supported runtime, so `smoke:node` drives the CLI under Node as a separate CI job.
 
-`smoke:pack` is the one that matters for packaging: it packs the tarball, installs it into a scratch project, and runs the *installed* binary under both runtimes. Testing the checkout alone is what let a broken Node install ship three times.
+`smoke:pack` is the one that matters for packaging: it packs the tarball, installs it into a scratch project, and runs the *installed* binary under all three runtimes — plus both bin aliases through the `node_modules/.bin` shebang path, with only Node on `PATH`. Testing the checkout alone is what let a broken Node install ship three times.
 
-Developing domdomdom needs only Bun — the scripts run under `bun`, the build uses `bunx tsc`, and packing uses `bun pm pack`. The checks that execute Node skip with a notice if Node isn't installed, and hard-fail instead when `CI` is set so a missing runtime can't pass silently.
+Developing domdomdom needs only Bun — the scripts run under `bun`, the build uses `bunx tsc`, and packing uses `bun pm pack`. The checks that execute Node or Deno skip with a notice if that runtime isn't installed, and hard-fail instead when `CI` is set so a missing runtime can't pass silently.
 
 ## Releasing
 
@@ -266,7 +279,7 @@ Releases are fully automated — there are no manual steps and no npm token.
 gh workflow run release.yml -f bump=patch|minor|major
 ```
 
-CI runs the quality gate and Node smoke test, then bumps the version, commits, tags, pushes and publishes to npm via [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC), with provenance attestation. It refuses to run anywhere but `main`.
+CI runs the quality gate, the Node smoke test and the packed-tarball smoke test, then bumps the version, commits, tags, pushes and publishes to npm via [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC), with provenance attestation. It refuses to run anywhere but `main`. `release.yml` and `test.yml` gate on the same checks on purpose — a release must not be able to fail on something PR CI never ran.
 
 The same run fast-forwards the `release` branch, which is the Claude Code plugin channel — the marketplace pins `ref: release`, so the plugin ships when npm does, with no separate step.
 

@@ -52,6 +52,13 @@ jobs:
           node-version: '24'
           registry-url: https://registry.npmjs.org
 
+      # Deno is a target runtime and smoke:pack gates it. The release gate and
+      # the PR gate must run the same checks or a release can fail on something
+      # PR CI never ran — keep this in step with test.yml.
+      - uses: denoland/setup-deno@v2.0.5
+        with:
+          deno-version: v2.x
+
       # Trusted publishing requires npm >= 11.5.1, newer than what Node bundles.
       - name: Update npm
         run: npm install -g npm@latest
@@ -62,10 +69,17 @@ jobs:
       - name: Quality gate
         run: bun run quality
 
-      # Node is a supported runtime but bun:test can't cover it. See
+      # Node is the target runtime but bun:test can't cover it. See
       # scripts/smoke-node.mjs.
       - name: Node smoke test
         run: bun run smoke:node
+
+      # The packaging gate: packs the tarball, installs it, runs the installed
+      # bin under Node, Bun and Deno. This is the check that would have caught
+      # the .ts-shipping bug that survived three releases, so the release must
+      # run it too and not only PR CI.
+      - name: Packed-tarball smoke test
+        run: bun run smoke:pack
 
       - name: Configure git identity
         run: |

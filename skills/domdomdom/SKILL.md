@@ -6,11 +6,25 @@ user-invocable: true
 
 # domdomdom
 
-Lightweight CLI for running JS against an HTML page. Powered by happy-dom — no browser binary, no Playwright, no MCP server. Runs on Bun ≥1.3 or Node ≥20.
+Lightweight CLI for running JS against an HTML page. Powered by happy-dom — no browser binary, no Playwright, no MCP server. Runs on Node ≥20, Bun, or Deno ≥2.
 
 ## Install
 
 Needs `domdomdom` on PATH: `bun add -g domdomdom` (or `npm i -g domdomdom`). If it's not installed, use `bunx domdomdom` (or `npx domdomdom`) as a drop-in, no-install fallback — same flags, same output, just prefix every invocation below with it instead of the bare command.
+
+### Which runtime you are on
+
+The bin ships compiled ESM with a `#!/usr/bin/env -S node` shebang. All three runtimes work, but they get in differently:
+
+| Runtime | Global install | No-install |
+| ------- | -------------- | ---------- |
+| Node ≥ 20 | `npm i -g domdomdom`, then `domdomdom …` | `npx domdomdom …` |
+| Bun | `bun add -g domdomdom`, then `domdomdom …` — **needs Node also present**, because the OS resolves the shebang | `bunx domdomdom …` (no Node needed) |
+| Deno ≥ 2 | `deno install -g -A npm:domdomdom` — Deno writes its own shim, the shebang is never read | `deno run -A npm:domdomdom …` |
+
+One gap worth knowing: on a **Bun-only machine with no Node on `PATH`**, a globally installed `domdomdom` cannot be run *directly* — use `bunx domdomdom …` instead. Everything else in this skill is identical on all three.
+
+`deno install -g` installs one command, named after the package. For the short alias: `deno install -g -A --name ddd npm:domdomdom`.
 
 ## Invocation
 

@@ -1,6 +1,8 @@
-// Smoke-tests the shipped CLI under Node. The bun:test suite can't do this —
-// it imports `bun:test` — yet Node is a supported runtime (engines.node
-// >=23.6) and the bin is a .ts file run through --experimental-strip-types.
+// Smoke-tests the CLI under Node, from the checkout. The bun:test suite can't
+// do this — it imports `bun:test` — yet Node is the *target* runtime: the
+// shipped bin's shebang is node, and engines.node is >=20.0.0 (happy-dom's own
+// floor). From a checkout the bin is still .ts, so this runs it through
+// --experimental-strip-types.
 //
 // This exercises the parts most likely to break there specifically: type
 // stripping on the bin, happy-dom under Node, and wicked-good-xpath — a 2016
@@ -16,7 +18,7 @@
 // scripts/smoke-pack.mjs, which installs the packed tarball and catches that
 // class of bug; this file only covers the checkout path.
 import { execFileSync } from 'node:child_process'
-import { requireNodeOrSkip } from './node-bin.mjs'
+import { requireNodeOrSkip } from './runtimes.mjs'
 
 // Runs under Bun, so process.execPath is the bun binary — resolve Node itself.
 const node = requireNodeOrSkip('node smoke')

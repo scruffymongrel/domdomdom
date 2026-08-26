@@ -195,7 +195,7 @@ Restart Claude Code. The skill auto-loads when the user's prompt matches its tri
 
 ### Keeping the plugin and CLI in sync
 
-domdomdom installs as two separate artifacts from one repo at one version: this plugin, which ships the skill only (from the `scruffymongrel` marketplace, pinned to the `release` branch), and the npm package, which ships the `domdomdom`/`ddd` binaries. They install and upgrade independently, so they can drift — see AGENTS.md for the channel-split invariant behind this.
+domdomdom installs as two separate artifacts from one repo at one version: this plugin, which ships the skill only (from the `scruffymongrel` marketplace, pinned to the `plugin` branch), and the npm package, which ships the `domdomdom`/`ddd` binaries. They install and upgrade independently, so they can drift — see AGENTS.md for the channel-split invariant behind this.
 
 **Upgrade both, as a pair:**
 
@@ -204,7 +204,7 @@ domdomdom installs as two separate artifacts from one repo at one version: this 
 
 **Which one is stale?** `domdomdom --version` reports the installed CLI's version directly; compare it against the plugin's version, visible from `/plugin`'s Installed tab. The same behavioral check catches it too: if this skill (or this README) describes a flag or verb `domdomdom --help` doesn't list, the CLI is behind — upgrade it from npm. If `domdomdom --help` shows something this doc never mentions, the plugin is behind — update it through `/plugin`.
 
-**One direction only.** The release workflow advances the `release` branch — the plugin channel — only *after* `npm publish` succeeds (see "Releasing" below and AGENTS.md). So npm is never behind the plugin; only the reverse can happen, and only because a user hasn't updated the plugin on their machine yet.
+**One direction only.** The release workflow advances the `plugin` branch — the plugin channel — only *after* `npm publish` succeeds (see "Releasing" below and AGENTS.md). So npm is never behind the plugin; only the reverse can happen, and only because a user hasn't updated the plugin on their machine yet.
 
 **Quick fix:** `bunx domdomdom`, `npx domdomdom`, and `deno run -A npm:domdomdom` always fetch latest by default, sidestepping CLI staleness entirely — reach for one of these when you're not sure which side has drifted.
 
@@ -296,7 +296,7 @@ gh workflow run release.yml -f bump=patch|minor|major
 
 CI runs the quality gate, the Node smoke test and the packed-tarball smoke test, then bumps the version, commits, tags, pushes and publishes to npm via [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC), with provenance attestation. It refuses to run anywhere but `main`. `release.yml` and `test.yml` gate on the same checks on purpose — a release must not be able to fail on something PR CI never ran.
 
-The same run builds the `release` branch, which is the Claude Code plugin channel — the marketplace pins `ref: release`, so the plugin ships when npm does, with no separate step. It isn't a copy of `main`: `scripts/build-plugin-channel.mjs` commits a tree of exactly `.claude-plugin/`, `skills/`, `README.md` and `LICENSE`, with no `package.json` and no lockfile — Claude Code installs dependencies into any plugin root that has both, and a skills-only plugin has no hooks or MCP servers that could ever load them.
+The same run builds the `plugin` branch, which is the Claude Code plugin channel — the marketplace pins `ref: plugin`, so the plugin ships when npm does, with no separate step. It isn't a copy of `main`: `scripts/build-plugin-channel.mjs` commits a tree of exactly `.claude-plugin/`, `skills/`, `README.md` and `LICENSE`, with no `package.json` and no lockfile — Claude Code installs dependencies into any plugin root that has both, and a skills-only plugin has no hooks or MCP servers that could ever load them.
 
 Don't bump `version` in `package.json` by hand — CI owns it, and a manual bump double-bumps. Don't rename `.github/workflows/release.yml` either; npm's trusted publisher is keyed to the repo *and* the workflow filename.
 

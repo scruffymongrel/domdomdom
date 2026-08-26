@@ -106,7 +106,7 @@ jobs:
         run: npm publish --access public
 
       # The Claude Code plugin channel. scruffymongrel/claude-plugins pins
-      # `ref: release`, so advancing this branch is what ships the plugin —
+      # `ref: plugin`, so advancing this branch is what ships the plugin —
       # replacing a hand-written "bump domdomdom pin to vX.Y.Z" commit in that
       # repo after every release.
       #
@@ -127,13 +127,13 @@ jobs:
       # skills-only plugin can never load. See scripts/build-plugin-channel.mjs.
       # The built commit is a child of the current channel tip, so this push is
       # an ordinary fast-forward and never needs --force.
-      - name: Build and advance the plugin release channel
+      - name: Build and advance the plugin channel
         run: |
           bun scripts/build-plugin-channel.mjs
-          git push origin release:release
+          git push origin plugin:plugin
 
       - name: Summary
         run: |
           echo "Published \`domdomdom@${{ steps.bump.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "https://www.npmjs.com/package/domdomdom/v/${{ steps.bump.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Plugin channel \`release\` advanced to \`v${{ steps.bump.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Plugin channel \`plugin\` advanced to \`v${{ steps.bump.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"

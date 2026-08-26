@@ -1,6 +1,6 @@
-// Builds the Claude Code plugin distribution channel — the `release` branch.
+// Builds the Claude Code plugin distribution channel — the `plugin` branch.
 //
-// The channel used to be a fast-forward of main (`git push origin HEAD:release`),
+// The channel used to be a fast-forward of main (`git push origin HEAD:plugin`),
 // which shipped the entire dev tree into every user's plugin cache. That is not
 // free: Claude Code runs a dependency install in a plugin's root when it finds
 // **both** a package.json and a supported lockfile (bun.lock/bun.lockb ->
@@ -24,12 +24,12 @@
 // Run it, then push:
 //
 //   bun scripts/build-plugin-channel.mjs
-//   git push origin release:release
+//   git push origin plugin:plugin
 //
 // `--dry-run` builds the objects and reports them without moving the branch.
 import { execFileSync } from 'node:child_process'
 
-const BRANCH = 'release'
+const BRANCH = 'plugin'
 
 // Everything the plugin channel ships, and nothing else. `.claude-plugin/` is
 // the only file Claude Code actually requires; skills/ is the payload; README
@@ -97,9 +97,9 @@ for (const file of files) {
 const { version } = JSON.parse(git('show', `${source}:package.json`))
 if (!version) fail(`${source}:package.json has no version`)
 
-// Parent selection. In CI there is no local `release` branch: actions/checkout
+// Parent selection. In CI there is no local `plugin` branch: actions/checkout
 // with **fetch-depth: 0** fetches `+refs/heads/*:refs/remotes/origin/*`, so the
-// channel tip arrives as refs/remotes/origin/release. That depth is load-bearing
+// channel tip arrives as refs/remotes/origin/plugin. That depth is load-bearing
 // here — a shallow checkout would not fetch the channel at all, this would build
 // an orphan, and the push would be rejected as a non-fast-forward. (Rejected, not
 // clobbered: nothing here forces, so the failure mode is a red step rather than a

@@ -47,7 +47,7 @@ describe('packaging', () => {
     })
   })
 
-  // The plugin cache is a git clone of the built `release` branch, which ships
+  // The plugin cache is a git clone of the built `plugin` branch, which ships
   // the skill and the manifest and no binary, so installing the plugin never
   // puts `domdomdom` on PATH. The skill has to say how to install the CLI or it
   // will tell an agent to run a command that does not exist.
@@ -74,17 +74,17 @@ describe('packaging', () => {
   })
 })
 
-// The plugin distribution channel — the `release` branch — is *built*, not
+// The plugin distribution channel — the `plugin` branch — is *built*, not
 // fast-forwarded from main. Claude Code runs a dependency install in a plugin
 // root that holds both a package.json and a supported lockfile (bun.lock ->
 // `bun install --frozen-lockfile --ignore-scripts`), and the old
-// `git push origin HEAD:release` shipped both, so every plugin install
+// `git push origin HEAD:plugin` shipped both, so every plugin install
 // materialised ~46-50MB of node_modules — for a plugin with no hooks and no MCP
 // servers, i.e. nothing that could ever load them.
 //
 // These tests are the guard on exactly that. If the built tree ever regains a
 // package.json or a lockfile, the waste is back and this fails.
-describe('plugin release channel', () => {
+describe('plugin channel', () => {
   const script = resolve(root, 'scripts/build-plugin-channel.mjs')
   const expected = ['.claude-plugin/plugin.json', 'LICENSE', 'README.md', 'skills/thing/SKILL.md']
   const LOCKFILES = /(^|\/)(bun\.lock|bun\.lockb|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml)$/
@@ -143,7 +143,7 @@ describe('plugin release channel', () => {
   test('the built tree holds the channel paths and nothing else', () => {
     withFixture(dir => {
       build(dir)
-      const files = git(dir, 'ls-tree', '-r', '--name-only', 'release').split('\n')
+      const files = git(dir, 'ls-tree', '-r', '--name-only', 'plugin').split('\n')
       expect([...files].sort()).toEqual([...expected].sort())
     })
   })
@@ -153,7 +153,7 @@ describe('plugin release channel', () => {
   test('the built tree has no package.json and no lockfile', () => {
     withFixture(dir => {
       build(dir)
-      const files = git(dir, 'ls-tree', '-r', '--name-only', 'release').split('\n')
+      const files = git(dir, 'ls-tree', '-r', '--name-only', 'plugin').split('\n')
       expect(files.filter(f => f === 'package.json' || LOCKFILES.test(f))).toEqual([])
     })
   })
@@ -161,15 +161,15 @@ describe('plugin release channel', () => {
   test('the channel commit names the released version', () => {
     withFixture(dir => {
       build(dir)
-      expect(git(dir, 'log', '-1', '--format=%s', 'release')).toBe('chore(plugin): v9.9.9')
+      expect(git(dir, 'log', '-1', '--format=%s', 'plugin')).toBe('chore(plugin): v9.9.9')
     })
   })
 
   test('creates the channel as an orphan when the branch does not exist yet', () => {
     withFixture(dir => {
       build(dir)
-      expect(git(dir, 'rev-list', '--count', 'release')).toBe('1')
-      expect(git(dir, 'log', '-1', '--format=%P', 'release')).toBe('')
+      expect(git(dir, 'rev-list', '--count', 'plugin')).toBe('1')
+      expect(git(dir, 'log', '-1', '--format=%P', 'plugin')).toBe('')
     })
   })
 
@@ -177,25 +177,25 @@ describe('plugin release channel', () => {
     withFixture(dir => {
       // The channel as it was before this change: a fast-forward of main.
       const before = git(dir, 'rev-parse', 'HEAD')
-      git(dir, 'branch', 'release', before)
+      git(dir, 'branch', 'plugin', before)
 
       build(dir)
-      expect(git(dir, 'log', '-1', '--format=%P', 'release')).toBe(before)
+      expect(git(dir, 'log', '-1', '--format=%P', 'plugin')).toBe(before)
       // Throws if the old tip isn't an ancestor — i.e. if a push would be rejected.
-      git(dir, 'merge-base', '--is-ancestor', before, 'release')
+      git(dir, 'merge-base', '--is-ancestor', before, 'plugin')
 
       // Rerunnable: a second run is a valid child of the first, same tree.
-      const first = git(dir, 'rev-parse', 'release')
+      const first = git(dir, 'rev-parse', 'plugin')
       build(dir)
-      expect(git(dir, 'log', '-1', '--format=%P', 'release')).toBe(first)
-      expect(git(dir, 'rev-parse', 'release^{tree}')).toBe(git(dir, 'rev-parse', `${first}^{tree}`))
+      expect(git(dir, 'log', '-1', '--format=%P', 'plugin')).toBe(first)
+      expect(git(dir, 'rev-parse', 'plugin^{tree}')).toBe(git(dir, 'rev-parse', `${first}^{tree}`))
     })
   })
 
   test('the release workflow builds the channel instead of fast-forwarding main', () => {
     const workflow = readFileSync(resolve(root, '.github/workflows/release.yml'), 'utf8')
     expect(workflow).toContain('bun scripts/build-plugin-channel.mjs')
-    expect(workflow).not.toContain('HEAD:release')
+    expect(workflow).not.toContain('HEAD:plugin')
     // Still after the publish: the channel must never point at a version that
     // isn't on npm.
     expect(workflow.indexOf('npm publish')).toBeLessThan(workflow.indexOf('build-plugin-channel'))

@@ -1,6 +1,6 @@
 // Builds the Claude Code plugin distribution channel — the `plugin` branch.
 //
-// The channel used to be a fast-forward of main (`git push origin HEAD:plugin`),
+// The channel used to be a fast-forward of main (`git push origin HEAD:release`),
 // which shipped the entire dev tree into every user's plugin cache. That is not
 // free: Claude Code runs a dependency install in a plugin's root when it finds
 // **both** a package.json and a supported lockfile (bun.lock/bun.lockb ->

@@ -78,7 +78,7 @@ describe('packaging', () => {
 // fast-forwarded from main. Claude Code runs a dependency install in a plugin
 // root that holds both a package.json and a supported lockfile (bun.lock ->
 // `bun install --frozen-lockfile --ignore-scripts`), and the old
-// `git push origin HEAD:plugin` shipped both, so every plugin install
+// `git push origin HEAD:release` shipped both, so every plugin install
 // materialised ~46-50MB of node_modules — for a plugin with no hooks and no MCP
 // servers, i.e. nothing that could ever load them.
 //

@@ -60,7 +60,7 @@ Invariants — these are the ways to get it wrong:
   `npm-shrinkwrap.json` → `npm ci --ignore-scripts`. With a `package.json` and
   no lockfile it is skipped, silently, with no log entry.
 
-  The old channel was `git push origin HEAD:plugin`, so it carried the whole
+  The old channel was `git push origin HEAD:release`, so it carried the whole
   dev tree including `bun.lock`, and every single plugin install materialised
   ~46-50MB of `node_modules`. Those deps exist so a plugin's hooks and MCP
   servers can load them. **This plugin ships skills only — no hooks, no MCP

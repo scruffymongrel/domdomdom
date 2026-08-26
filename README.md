@@ -202,7 +202,7 @@ domdomdom installs as two separate artifacts from one repo at one version: this 
 - **Plugin** — `/plugin update` in Claude Code (opens the plugin manager; pick `domdomdom@scruffymongrel` from the Installed tab), or `claude plugin update domdomdom@scruffymongrel` from the shell. Run `/reload-plugins` (or restart) to pick it up in the current session.
 - **CLI** — `npm i -g domdomdom@latest` / `bun add -g domdomdom@latest` / `deno install -g -A npm:domdomdom@latest`, reinstalling over the existing global link.
 
-**Which one is stale?** domdomdom's CLI has no `--version` flag, so the signal is behavioral, not numeric: if this skill (or this README) describes a flag or verb `domdomdom --help` doesn't list, the CLI is behind — upgrade it from npm. If `domdomdom --help` shows something this doc never mentions, the plugin is behind — update it through `/plugin`.
+**Which one is stale?** `domdomdom --version` reports the installed CLI's version directly; compare it against the plugin's version, visible from `/plugin`'s Installed tab. The same behavioral check catches it too: if this skill (or this README) describes a flag or verb `domdomdom --help` doesn't list, the CLI is behind — upgrade it from npm. If `domdomdom --help` shows something this doc never mentions, the plugin is behind — update it through `/plugin`.
 
 **One direction only.** The release workflow advances the `release` branch — the plugin channel — only *after* `npm publish` succeeds (see "Releasing" below and AGENTS.md). So npm is never behind the plugin; only the reverse can happen, and only because a user hasn't updated the plugin on their machine yet.
 

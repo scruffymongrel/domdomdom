@@ -33,7 +33,7 @@ This ships as two independent installs: the plugin (this skill, via `/plugin`) a
 - Skill mentions a flag/verb `domdomdom --help` doesn't have -> CLI is behind. Fix: `npm i -g domdomdom@latest` (or `bun add -g`, or prefix any command with `bunx domdomdom`/`npx domdomdom` to run latest with no install).
 - `domdomdom --help` shows something this skill never mentions -> plugin is behind. Fix: `/plugin update`.
 
-domdomdom has no `--version` flag, so this behavioral check is the signal — see README for the full explanation.
+Compare versions directly with `domdomdom --version` against the plugin's version — see README for the full explanation.
 
 ## Invocation
 

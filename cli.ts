@@ -30,6 +30,7 @@ Other options:
   --no-console              drop console.* output instead of capturing it
   --json                    emit a single JSON line: { ok, result?, error?, logs }
   -h, --help                show this help
+  -V, --version             print the package version and exit
 
 Output (default):
   result               -> stdout (string passthrough; objects pretty-JSON; cycles handled)
@@ -56,6 +57,35 @@ interface Args {
   json: boolean
   help: boolean
 }
+
+/**
+ * Filled in at build time is overkill; reading our own manifest is enough.
+ *
+ * This file ships at two different depths relative to package.json: as
+ * source (cli.ts), sitting right next to it at the package root; as the
+ * built dist/cli.js, one directory down. Try the sibling location first,
+ * then the parent, so this resolves correctly whichever one is actually
+ * running — including the built layout inside a consumer's node_modules,
+ * where the source location doesn't exist at all.
+ *
+ * A plain function rather than an inline IIFE so tests can point it at a
+ * synthetic URL and exercise the parent-fallback and not-found branches
+ * directly — the real `import.meta.url` only ever takes one of those paths
+ * in a given run.
+ */
+export function resolvePackageVersion(fromUrl: string | URL = import.meta.url): string {
+  for (const rel of ['./package.json', '../package.json']) {
+    try {
+      const pkg = JSON.parse(readFileSync(new URL(rel, fromUrl), 'utf8'))
+      if (typeof pkg.version === 'string') return pkg.version
+    } catch {
+      // try the next candidate
+    }
+  }
+  return '0.0.0'
+}
+
+export const PACKAGE_VERSION: string = resolvePackageVersion()
 
 /** Streams the CLI uses for I/O. Injected so tests can drive runCli() in-process. */
 export interface CliIO {
@@ -225,6 +255,12 @@ export async function runFromProcess(
   stderr: { write(s: string): unknown } = process.stderr,
   exit: (code: number) => never = ((code: number) => process.exit(code)) as (code: number) => never,
 ): Promise<never> {
+  // Handled before parseArgs (inside runCli), which rejects unknown options —
+  // same reason bbb, our sibling CLI, does this early rather than as a flag.
+  if (argv[0] === '--version' || argv[0] === '-V') {
+    stdout.write(PACKAGE_VERSION + '\n')
+    return exit(0)
+  }
   let code: number
   try {
     code = await runCli({ argv, stdin, stdout, stderr })

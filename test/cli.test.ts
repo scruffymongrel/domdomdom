@@ -1,7 +1,15 @@
 import { test, expect, describe } from 'bun:test'
 import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { runCli, runFromProcess, isEntrypoint, type CliIO } from '../cli.ts'
+import {
+  runCli,
+  runFromProcess,
+  isEntrypoint,
+  resolvePackageVersion,
+  PACKAGE_VERSION,
+  type CliIO,
+} from '../cli.ts'
 
 const ROOT = resolve(import.meta.dir, '..')
 
@@ -108,6 +116,7 @@ describe('runCli()', () => {
     expect(r.exit).toBe(0)
     expect(r.stdout).toContain('domdomdom')
     expect(r.stdout).toContain('Usage:')
+    expect(r.stdout).toContain('-V, --version')
   })
 
   test('-h short flag works too', async () => {
@@ -212,6 +221,26 @@ describe('runCli()', () => {
   })
 })
 
+describe('resolvePackageVersion()', () => {
+  test('default: resolves the sibling package.json (source layout)', () => {
+    const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'))
+    expect(resolvePackageVersion()).toBe(pkg.version)
+  })
+
+  test('falls back to the parent package.json (built dist/ layout)', () => {
+    // Simulates dist/cli.js: a file one directory below the package root, so
+    // the sibling candidate misses and the parent candidate hits.
+    const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'))
+    const distUrl = new URL('dist/cli.js', `file://${ROOT}/`)
+    expect(resolvePackageVersion(distUrl)).toBe(pkg.version)
+  })
+
+  test('returns 0.0.0 when no candidate resolves', () => {
+    const nowhereUrl = new URL('file:///tmp/domdomdom-resolve-test-nowhere/deep/fake.js')
+    expect(resolvePackageVersion(nowhereUrl)).toBe('0.0.0')
+  })
+})
+
 describe('runFromProcess()', () => {
   // Drive runFromProcess directly so coverage sees both the success and fatal
   // branches. We pass mock IO + an `exit` hook that throws so we can capture
@@ -224,6 +253,40 @@ describe('runFromProcess()', () => {
     }) as (n: number) => never
     return { code: () => captured, exit }
   }
+
+  test('--version prints the package version and exits 0, bypassing runCli', async () => {
+    const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'))
+    const { code, exit } = captureExit()
+    let stdout = ''
+    await runFromProcess(
+      ['--version'],
+      fromString(''),
+      { write: (s: string) => { stdout += s; return true } },
+      { write: () => true },
+      exit,
+    ).catch(e => {
+      if ((e as Error).message !== '__exit_called__') throw e
+    })
+    expect(code()).toBe(0)
+    expect(stdout).toBe(`${pkg.version}\n`)
+    expect(PACKAGE_VERSION).toBe(pkg.version)
+  })
+
+  test('-V short flag works too', async () => {
+    const { code, exit } = captureExit()
+    let stdout = ''
+    await runFromProcess(
+      ['-V'],
+      fromString(''),
+      { write: (s: string) => { stdout += s; return true } },
+      { write: () => true },
+      exit,
+    ).catch(e => {
+      if ((e as Error).message !== '__exit_called__') throw e
+    })
+    expect(code()).toBe(0)
+    expect(stdout.trim()).toBe(PACKAGE_VERSION)
+  })
 
   test('happy path: exits with code from runCli', async () => {
     const { code, exit } = captureExit()

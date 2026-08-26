@@ -193,6 +193,21 @@ domdomdom is a Claude Code plugin (`.claude-plugin/plugin.json` in this repo) li
 
 Restart Claude Code. The skill auto-loads when the user's prompt matches its trigger ("evaluate JS against this page", "test if the bundle exposes X on window", "extract X from this HTML", etc.). Users can also invoke explicitly with `/domdomdom`.
 
+### Keeping the plugin and CLI in sync
+
+domdomdom installs as two separate artifacts from one repo at one version: this plugin, which ships the skill only (from the `scruffymongrel` marketplace, pinned to the `release` branch), and the npm package, which ships the `domdomdom`/`ddd` binaries. They install and upgrade independently, so they can drift — see AGENTS.md for the channel-split invariant behind this.
+
+**Upgrade both, as a pair:**
+
+- **Plugin** — `/plugin update` in Claude Code (opens the plugin manager; pick `domdomdom@scruffymongrel` from the Installed tab), or `claude plugin update domdomdom@scruffymongrel` from the shell. Run `/reload-plugins` (or restart) to pick it up in the current session.
+- **CLI** — `npm i -g domdomdom@latest` / `bun add -g domdomdom@latest` / `deno install -g -A npm:domdomdom@latest`, reinstalling over the existing global link.
+
+**Which one is stale?** domdomdom's CLI has no `--version` flag, so the signal is behavioral, not numeric: if this skill (or this README) describes a flag or verb `domdomdom --help` doesn't list, the CLI is behind — upgrade it from npm. If `domdomdom --help` shows something this doc never mentions, the plugin is behind — update it through `/plugin`.
+
+**One direction only.** The release workflow advances the `release` branch — the plugin channel — only *after* `npm publish` succeeds (see "Releasing" below and AGENTS.md). So npm is never behind the plugin; only the reverse can happen, and only because a user hasn't updated the plugin on their machine yet.
+
+**Quick fix:** `bunx domdomdom`, `npx domdomdom`, and `deno run -A npm:domdomdom` always fetch latest by default, sidestepping CLI staleness entirely — reach for one of these when you're not sure which side has drifted.
+
 ### Other agents (Cursor, Aider, Codex CLI, Copilot, etc.)
 
 The skill follows the [Agent Skills open standard](https://agentskills.io/specification) — an emerging cross-agent format that's just `SKILL.md` with YAML frontmatter. After installing domdomdom (`npm i -g domdomdom`), the skill ships at `$(npm root -g)/domdomdom/skills/domdomdom/`. Copy it into your agent's skill directory:

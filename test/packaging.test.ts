@@ -54,4 +54,20 @@ describe('packaging', () => {
     expect(skill).toContain('npm i -g domdomdom')
     expect(skill).toContain('bunx domdomdom')
   })
+
+  // The plugin (skill) and the npm package (binary) install and upgrade
+  // independently, so they can drift silently. Both docs need to say how to
+  // upgrade each one and how to recognise which one is behind.
+  test('the skill documents the plugin/CLI upgrade dance', () => {
+    const skill = readFileSync(resolve(root, 'skills/domdomdom/SKILL.md'), 'utf8')
+    expect(skill).toContain('/plugin update')
+    expect(skill).toContain('npm i -g domdomdom@latest')
+  })
+
+  test('the README documents the plugin/CLI upgrade dance', () => {
+    const readme = readFileSync(resolve(root, 'README.md'), 'utf8')
+    expect(readme).toContain('/plugin update')
+    expect(readme).toContain('npm i -g domdomdom@latest')
+    expect(readme).toMatch(/only \*after\* `npm publish` succeeds/)
+  })
 })

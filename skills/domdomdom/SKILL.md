@@ -26,6 +26,15 @@ One gap worth knowing: on a **Bun-only machine with no Node on `PATH`**, a globa
 
 `deno install -g` installs one command, named after the package. For the short alias: `deno install -g -A --name ddd npm:domdomdom`.
 
+### Version drift (plugin vs CLI)
+
+This ships as two independent installs: the plugin (this skill, via `/plugin`) and the CLI (the `domdomdom`/`ddd` binary, via npm). They can drift.
+
+- Skill mentions a flag/verb `domdomdom --help` doesn't have -> CLI is behind. Fix: `npm i -g domdomdom@latest` (or `bun add -g`, or prefix any command with `bunx domdomdom`/`npx domdomdom` to run latest with no install).
+- `domdomdom --help` shows something this skill never mentions -> plugin is behind. Fix: `/plugin update`.
+
+domdomdom has no `--version` flag, so this behavioral check is the signal — see README for the full explanation.
+
 ## Invocation
 
 Pipe the JS via stdin. Always use `--json` (parseable output) and `--timeout` (bound execution):

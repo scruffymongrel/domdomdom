@@ -121,7 +121,7 @@ domdomdom is significantly cheaper than a real browser: no binary, no process, ~
 
 ## Limits to remember
 
-- **No layout.** Computed styles return `''` for unstyled elements.
+- **No layout — and it fails silently, not loudly.** `getBoundingClientRect()`, `offsetHeight` and `scrollHeight` return **`0`** instantly rather than throwing. Measured on a real page where Chrome reports `8670`, all three returned `0` in under 0.1ms. Computed styles are unreliable in the same way — sometimes `''`, sometimes a default, rather than the real cascade. So a layout-dependent check quietly passes or fails on a wrong number, with nothing to signal it. When the answer depends on rendered geometry, use `browsebrowsebrowse` (`bbb`).
 - **`innerText` is a performance cliff — use `textContent`.** `innerText` is layout-dependent by definition, and with no layout engine it degrades badly on a large subtree. Measured on one 16KB element: `textContent` **1.5s**, `innerText` **28s** (~18x). Same call under `bbb`: 2.4s. So prefer `textContent`; if you specifically need `innerText`'s layout-aware line breaking on a big element, that is a reason to reach for `browsebrowsebrowse` instead.
 - **Async timeout only.** `--timeout` won't kill a synchronous `while(true){}` (shared event loop). For a hard ceiling, wrap in shell `timeout`: `timeout 5s domdomdom ...`.
 - **No bare specifiers** in `<script type="module">`. Relative imports work.

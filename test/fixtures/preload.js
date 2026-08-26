@@ -1,1 +1,0 @@
-window.PRELOADED = 'yes'

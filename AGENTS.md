@@ -37,6 +37,32 @@ Invariants — these are the ways to get it wrong:
   pins `ref: release`, and the release workflow fast-forwards it after a
   successful publish. Don't push to it by hand — that would ship plugin content
   for a version that isn't on npm.
+- **The plugin channel and the npm channel ship different content, on
+  purpose.** The plugin cache
+  (`~/.claude/plugins/cache/scruffymongrel/domdomdom/<version>/`) is a git
+  clone of the `release` branch. `dist/` is gitignored, so that clone has
+  source (`.ts`), `skills/`, and `.claude-plugin/` — never a built binary. The
+  npm tarball is the mirror image: `files:` in `package.json` ships `dist/`
+  (built at pack time via `prepack`) plus the plugin manifest, not the raw
+  `.ts`. Two channels, one repo, deliberately asymmetric — the plugin's only
+  job is delivering the skill (and the source, for reference), not making
+  `domdomdom` runnable on its own.
+
+  This is a trap for a future agent: seeing "the plugin has no `dist/`" reads
+  like a packaging bug, and the obvious "fix" — un-gitignore `dist/`, or add
+  it to the `release` branch — would ship build artifacts into a channel that
+  was never meant to carry them, for no benefit (the plugin doesn't run
+  `dist/`; it only ships the skill that tells an agent to reach for the CLI).
+  If `dist/` genuinely needs to reach the plugin cache someday, that's a
+  deliberate distribution change to design, not a gitignore tweak.
+
+  This is also the root cause of a real gap in `skills/domdomdom/SKILL.md`:
+  the skill assumed `domdomdom` was on PATH, but installing the plugin alone
+  never puts it there — only `bun add -g domdomdom` (or `npm i -g domdomdom`,
+  or the `bunx domdomdom` no-install fallback) does. The skill now documents
+  that install step and the fallback explicitly, but the underlying reason is
+  this channel split: the plugin's `dist/`-less clone structurally cannot ship
+  a runnable binary, by design.
 - **Never rename `.github/workflows/release.yml`.** npm's trusted publisher is
   keyed to repo *and workflow filename*. Renaming it breaks publishing with an
   auth error at the final step, after the version has already been bumped and

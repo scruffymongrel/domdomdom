@@ -6,7 +6,11 @@ user-invocable: true
 
 # domdomdom
 
-Lightweight CLI for running JS against an HTML page. Powered by happy-dom — no browser binary, no Playwright, no MCP server. Runs on Bun ≥1.3 or Node ≥23.6.
+Lightweight CLI for running JS against an HTML page. Powered by happy-dom — no browser binary, no Playwright, no MCP server. Runs on Bun ≥1.3 or Node ≥20.
+
+## Install
+
+Needs `domdomdom` on PATH: `bun add -g domdomdom` (or `npm i -g domdomdom`). If it's not installed, use `bunx domdomdom` (or `npx domdomdom`) as a drop-in, no-install fallback — same flags, same output, just prefix every invocation below with it instead of the bare command.
 
 ## Invocation
 
@@ -80,12 +84,17 @@ XPath 1.0 only — no 2.0+ sequences, `for`/`let`, or richer types.
 
 ## Don't reach for this when
 
-| Need                                    | Use instead          |
-| --------------------------------------- | -------------------- |
-| Layout, `getComputedStyle`, screenshots | Playwright           |
-| Click, scroll, type, navigation flows   | Playwright           |
-| Hard isolation for untrusted JS         | Playwright sandbox   |
-| Parse HTML *without* executing scripts  | linkedom (faster)    |
+domdomdom is significantly cheaper than a real browser: no binary, no process, ~100-300ms — versus a real browser's ~1s cold start and ~180MB engine. When both would work, prefer domdomdom; reach for the alternatives below only when the task genuinely needs what they provide.
+
+| Need                                            | Use instead |
+| ------------------------------------------------ | ----------- |
+| Layout, `getComputedStyle`, screenshots           | `browsebrowsebrowse` (`bbb`)[^bbb] |
+| Click, scroll, type, navigation flows             | `browsebrowsebrowse` (`bbb`)[^bbb] |
+| The user's own real, logged-in browser session    | claude-in-chrome |
+| Hard isolation for untrusted JS                   | a real sandbox (container, or Cloudflare Sandbox) — not a browser automation tool, which isn't a security boundary |
+| Parse HTML *without* executing scripts            | linkedom (faster) |
+
+[^bbb]: `browsebrowsebrowse` is a sibling headless-Chrome CLI — same author, same marketplace as domdomdom — built for the layout/interaction work domdomdom deliberately doesn't do. It's under active development and not yet published; don't expect it installable today.
 
 ## Limits to remember
 

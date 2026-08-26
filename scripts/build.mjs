@@ -36,13 +36,31 @@ run('bun', [
 run('bunx', ['tsc', '-p', 'tsconfig.build.json'])
 
 // bun build carries the source shebang through verbatim, and cli.ts's is
-// tuned for running the .ts directly from a checkout. The built file is plain
-// JS, so --experimental-strip-types is meaningless — but keep
-// --no-warnings=ExperimentalWarning, or happy-dom's "localStorage is not
-// available" warning hits stderr on every single run.
+// tuned for running the .ts directly from a checkout (node-only, needs
+// --experimental-strip-types). The built file is plain JS, so that flag is
+// meaningless — but engines declares both node >=20 and bun >=1.3, and a
+// plain `#!/usr/bin/env -S node ...` shebang can't honor that: a machine with
+// only bun installed (no node) can't execute the bin directly, because the OS
+// resolves the shebang's interpreter itself, before bun ever gets a say.
+// `bunx`/`bun x` sidestep this (they run the file through Bun's own loader,
+// ignoring the shebang entirely) but a direct `bun add -g` + bare invocation
+// does not.
+//
+// This is the standard sh/JS polyglot shebang: `/bin/sh` runs first (its path
+// is absolute, so it doesn't depend on PATH), picks whichever runtime is
+// actually installed, and re-execs the same file into it. `':' //` is a
+// no-op in both languages — sh sees `: //` (the no-op builtin with a
+// throwaway arg) then `; exec ...`; JS sees a discarded string literal
+// followed by a `//` comment that swallows the rest of the line. Keep
+// --no-warnings=ExperimentalWarning for node (silences happy-dom's
+// "localStorage is not available" warning); bun ignores unknown flags, so
+// passing it unconditionally is harmless there.
 const cli = 'dist/cli.js'
 const src = readFileSync(cli, 'utf8')
-const shebang = '#!/usr/bin/env -S node --no-warnings=ExperimentalWarning'
+const shebang = [
+  '#!/bin/sh',
+  '\':\' //; exec "$(command -v bun || command -v node)" --no-warnings=ExperimentalWarning "$0" "$@"',
+].join('\n')
 writeFileSync(cli, src.replace(/^#![^\n]*/, shebang))
 
 console.log('built dist/')

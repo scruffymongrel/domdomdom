@@ -21,15 +21,21 @@ Each of these is a one-line fix once you've found it. Finding them took an after
 
 ## When to use this vs. alternatives
 
+domdomdom is significantly cheaper than a real browser when both would work: no binary, no process, ~100-300ms — versus a real browser's ~1s cold start and ~180MB engine.
+
 | You want                                    | Use this           |
 | ------------------------------------------- | ------------------ |
 | Run a snippet against a real page, fast     | **domdomdom**      |
 | Test code that uses `document`, `window`    | **domdomdom**      |
 | Verify an IIFE bundle attaches to `window`  | **domdomdom**      |
-| Layout, computed styles, screenshots        | Playwright         |
-| Run untrusted JS safely                     | Playwright (sandbox) or a worker pool |
+| Layout, computed styles, screenshots        | `browsebrowsebrowse` (`bbb`) * |
+| Click, scroll, type, navigation flows       | `browsebrowsebrowse` (`bbb`) * |
+| The user's own real, logged-in browser session | claude-in-chrome |
+| Run untrusted JS safely                     | a real sandbox (container, or Cloudflare Sandbox) — not a browser automation tool, which isn't a security boundary |
 | Parse HTML without executing scripts        | linkedom (faster)  |
 | Module bundling / build tooling             | bun build / esbuild |
+
+\* `browsebrowsebrowse` is a sibling headless-Chrome CLI — same author, same marketplace as domdomdom — for the layout/interaction work domdomdom deliberately doesn't do. It's under active development and not yet published.
 
 ## Install
 
@@ -208,11 +214,11 @@ Verifying a built bundle exposes its export on `window` &middot; extracting stru
 
 ### When not to
 
-Layout, screenshots, click/scroll interaction, or untrusted-code isolation. Use Playwright.
+Layout or screenshots — use `browsebrowsebrowse` (`bbb`), a sibling headless-Chrome CLI (same author/marketplace, in development, not yet published). Click/scroll/type/navigation flows — same, `bbb`. The user's own real, logged-in browser session — claude-in-chrome. Untrusted-code isolation — a real sandbox (container, or Cloudflare Sandbox); browser automation tools aren't a security boundary.
 
 ## Limits
 
-- **No layout.** `getComputedStyle().getPropertyValue('height')` returns `''` for unstyled elements. happy-dom doesn't render. For layout-dependent assertions, use Playwright.
+- **No layout.** `getComputedStyle().getPropertyValue('height')` returns `''` for unstyled elements. happy-dom doesn't render. For layout-dependent assertions, use `browsebrowsebrowse` (`bbb`) — the sibling headless-Chrome CLI for this class of task.
 - **Synchronous infinite loops.** `timeout` catches *async* hangs (long fetches, unresolved promises, slow setIntervals). It can't kill a `while(true){}` because the host event loop is shared with the page's V8 isolate. Wrap the CLI in `timeout 5s domdomdom ...` for a hard ceiling.
 - **Bare module specifiers.** `import 'lodash'` from inside a `<script type="module">` won't resolve — happy-dom needs a `resolveNodeModules` config, which we don't currently surface. Relative imports (`import './foo.js'`) work.
 - **Source maps.** Stack traces refer to evaluated-script offsets, not your original `.ts` files.

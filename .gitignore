@@ -37,3 +37,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cursor
 .clearance-rendered-preview-*
 dist/
+
+# machine-local harness settings. .claude is a symlink to .agents (the
+# harness-neutral real directory); ignoring only the .claude/ path (as some
+# global gitignores do) stops working once .claude stops being a real
+# directory, so this has to live in the repo's own .gitignore.
+.agents/settings.local.json

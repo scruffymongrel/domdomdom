@@ -27,8 +27,9 @@ Other options:
   --user-agent <ua>         override navigator.userAgent
   --viewport <WxH>          override page viewport, e.g. 1024x768
   --timeout <ms>            time limit; 0 disables; default 5000
+  --fail                    treat a non-2xx page as an error (like curl --fail)
   --no-console              drop console.* output instead of capturing it
-  --json                    emit a single JSON line: { ok, result?, error?, logs }
+  --json                    emit a single JSON line: { ok, result?, error?, logs, status }
   -h, --help                show this help
   -V, --version             print the package version and exit
 
@@ -37,7 +38,12 @@ Output (default):
   console.* messages   -> stderr, prefixed [log]/[warn]/[error]/[info]/[debug]
   errors               -> stderr ("EVAL ERROR: ...")
 
-Exit codes: 0 ok | 1 eval error | 2 timeout | 3 setup/usage error
+Exit codes: 0 ok | 1 eval error | 2 timeout | 3 setup/usage error | 4 HTTP error
+
+HTTP status:
+  --json always carries "status": the main document's final status after
+  redirects, or null for --html, a local file or about:blank. WITHOUT --fail a
+  404 still exits 0 with ok:true — check "status", not the exit code.
 
 Limits:
   Synchronous infinite loops in user code block the timeout (host event loop
@@ -54,6 +60,7 @@ interface Args {
   viewport: { width: number; height: number } | undefined
   timeout: number
   quietConsole: boolean
+  fail: boolean
   json: boolean
   help: boolean
 }
@@ -116,6 +123,7 @@ function parseCli(argv: string[]): Args {
       viewport: { type: 'string' },
       timeout: { type: 'string' },
       'no-console': { type: 'boolean' },
+      fail: { type: 'boolean' },
       json: { type: 'boolean' },
     },
   })
@@ -129,6 +137,7 @@ function parseCli(argv: string[]): Args {
     viewport: values.viewport ? parseViewport(values.viewport) : undefined,
     timeout: values.timeout != null ? Number(values.timeout) : 5000,
     quietConsole: !!values['no-console'],
+    fail: !!values.fail,
     json: !!values.json,
     help: !!values.help,
   }
@@ -162,22 +171,37 @@ function safeStringify(value: unknown): string {
   return JSON.stringify(toCloneable(value), null, 2)
 }
 
+/**
+ * The exit-code contract, in one place so the two emitters cannot disagree:
+ * 0 ok, 1 eval, 2 timeout, 3 setup/usage, 4 HTTP. Mirrored exactly by
+ * browsebrowsebrowse's `exitCodeFor()`; each code stays diagnostic, so a new
+ * failure mode gets a new number rather than borrowing one.
+ */
+export function exitCodeFor(result: EvaluateResult): number {
+  if (result.ok) return 0
+  switch (result.error.kind) {
+    case 'timeout':
+      return 2
+    case 'setup':
+      return 3
+    case 'http':
+      return 4
+    default:
+      return 1
+  }
+}
+
 function emitHuman(result: EvaluateResult, io: CliIO): number {
   for (const { level, message } of result.logs) {
     io.stderr.write(`[${level}] ${message}\n`)
   }
   if (!result.ok) {
     const e = result.error
-    if (e.kind === 'timeout') {
-      io.stderr.write(`TIMEOUT: ${e.message}\n`)
-      return 2
-    }
-    if (e.kind === 'setup') {
-      io.stderr.write(`SETUP ERROR: ${e.message}\n${e.stack ?? ''}\n`)
-      return 3
-    }
-    io.stderr.write(`EVAL ERROR: ${e.stack ?? e.message}\n`)
-    return 1
+    if (e.kind === 'timeout') io.stderr.write(`TIMEOUT: ${e.message}\n`)
+    else if (e.kind === 'setup') io.stderr.write(`SETUP ERROR: ${e.message}\n${e.stack ?? ''}\n`)
+    else if (e.kind === 'http') io.stderr.write(`HTTP ERROR: ${e.message}\n`)
+    else io.stderr.write(`EVAL ERROR: ${e.stack ?? e.message}\n`)
+    return exitCodeFor(result)
   }
   if (result.result === undefined) io.stdout.write('undefined\n')
   else io.stdout.write(safeStringify(result.result) + '\n')
@@ -186,15 +210,10 @@ function emitHuman(result: EvaluateResult, io: CliIO): number {
 
 function emitJson(result: EvaluateResult, io: CliIO): number {
   const payload = result.ok
-    ? { ok: true, result: toCloneable(result.result), logs: result.logs }
-    : { ok: false, error: result.error, logs: result.logs }
+    ? { ok: true, result: toCloneable(result.result), logs: result.logs, status: result.status }
+    : { ok: false, error: result.error, logs: result.logs, status: result.status }
   io.stdout.write(JSON.stringify(payload) + '\n')
-  if (!result.ok) {
-    if (result.error.kind === 'timeout') return 2
-    if (result.error.kind === 'setup') return 3
-    return 1
-  }
-  return 0
+  return exitCodeFor(result)
 }
 
 /**
@@ -235,6 +254,7 @@ export async function runCli(io: CliIO): Promise<number> {
     userAgent: args.userAgent,
     viewport: args.viewport,
     quietConsole: args.quietConsole,
+    failOnHttpError: args.fail,
   }
   if (args.html != null) opts.html = args.html
   else if (args.positional != null) opts.source = args.positional

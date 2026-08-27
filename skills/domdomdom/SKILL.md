@@ -60,13 +60,32 @@ Stdout is **one line of JSON**. Branch on `.ok`.
 
 ```json
 // success
-{ "ok": true, "result": <any>, "logs": [{"level": "log"|"warn"|"error"|"info"|"debug", "message": "..."}] }
+{ "ok": true, "result": <any>, "logs": [{"level": "log"|"warn"|"error"|"info"|"debug", "message": "..."}], "status": <number|null> }
 
 // failure
-{ "ok": false, "error": { "kind": "eval"|"timeout"|"setup", "message": "...", "stack": "..." }, "logs": [...] }
+{ "ok": false, "error": { "kind": "eval"|"timeout"|"setup"|"http", "message": "...", "stack": "..." }, "logs": [...], "status": <number|null> }
 ```
 
-Exit codes: `0` ok &middot; `1` eval error &middot; `2` timeout &middot; `3` setup/usage. Use the exit code as a cheap pre-check.
+Exit codes: `0` ok &middot; `1` eval error &middot; `2` timeout &middot; `3` setup/usage &middot; `4` HTTP error (`--fail` only).
+
+### HTTP status is NOT in the exit code
+
+`status` is the main document's **final** status after redirects, and `null` when nothing was fetched over HTTP (`--html`, a local file, `about:blank`). The key is always present.
+
+**A 404 exits 0 with `ok: true`.** That is deliberate — a 404 body is a page, and scraping it is legitimate — but it means *the exit code is not a fetch check*. A missing page returns the site's "not found" HTML, and code that reads `.result` gets a plausible-looking string with nothing to signal it.
+
+Two correct checks, pick one:
+
+```sh
+# 1. Read .status yourself, and decide.
+echo 'document.title' | domdomdom --json https://example.com/maybe   # -> {"ok":true,...,"status":404}
+
+# 2. Let --fail decide: non-2xx becomes ok:false, kind "http", exit 4.
+echo 'document.title' | domdomdom --json --fail https://example.com/maybe
+# -> {"ok":false,"error":{"kind":"http","status":404,"message":"HTTP 404 for ..."},"logs":[],"status":404}
+```
+
+`--fail` is opt-in and modelled on `curl --fail`. With it, the page's status is checked *before* your JS runs — a non-2xx never evaluates. It has no effect on `--html`, a local file or `about:blank`, where there is no status to fail on.
 
 ## Patterns
 
@@ -89,7 +108,7 @@ echo 'return await fetch("/api/x").then(r => r.json())' \
 
 ## Useful flags
 
-`--inject <f>` (preload, repeatable) &middot; `--script <f>` (code from file) &middot; `--module` (ESM) &middot; `--user-agent <s>` &middot; `--no-console` (drop logs) &middot; `--viewport WxH`. Run `domdomdom --help` for the full list.
+`--fail` (non-2xx is an error, exit 4) &middot; `--inject <f>` (preload, repeatable) &middot; `--script <f>` (code from file) &middot; `--module` (ESM) &middot; `--user-agent <s>` &middot; `--no-console` (drop logs) &middot; `--viewport WxH`. Run `domdomdom --help` for the full list.
 
 ## XPath works (no flag)
 
@@ -123,6 +142,14 @@ domdomdom is significantly cheaper than a real browser: no binary, no process, ~
 
 - **No layout — and it fails silently, not loudly.** `getBoundingClientRect()`, `offsetHeight` and `scrollHeight` return **`0`** instantly rather than throwing. Measured on a real page where Chrome reports `8670`, all three returned `0` in under 0.1ms. Computed styles are unreliable in the same way — sometimes `''`, sometimes a default, rather than the real cascade. So a layout-dependent check quietly passes or fails on a wrong number, with nothing to signal it. When the answer depends on rendered geometry, use `browsebrowsebrowse` (`bbb`).
 - **`innerText` is a performance cliff — use `textContent`.** `innerText` is layout-dependent by definition, and with no layout engine it degrades badly on a large subtree. Measured on one 16KB element: `textContent` **1.5s**, `innerText` **28s** (~18x). Same call under `bbb`: 2.4s. So prefer `textContent`; if you specifically need `innerText`'s layout-aware line breaking on a big element, that is a reason to reach for `browsebrowsebrowse` instead.
+- **Present but inert — feature detection will lie to you.** These exist, pass a `typeof` check, and then do nothing. Measured on a real page against Chrome:
+  - **`IntersectionObserver` is a `function` and never fires.** This is the one that will cost you. Lazy-loaded images, infinite scroll and reveal-on-scroll are all built on it, so that content is simply *absent* — no error, no warning, an empty `[]` that looks like a correct answer. If a page renders its list on scroll, domdomdom cannot see the list.
+  - `ResizeObserver` — same: constructs, observes, never fires.
+  - `canvas.getContext('2d')` returns `null`, so any canvas work throws on the first property access rather than where the problem is.
+  - `document.elementFromPoint()` returns `null` (it is a layout question).
+  - `isSecureContext` is absent — a bare reference is a `ReferenceError`, not `undefined`. Guard with `typeof isSecureContext`.
+
+  Verified working, so don't avoid the tool for these: `MutationObserver` fires, `requestAnimationFrame` fires, `matchMedia` evaluates correctly, plus `localStorage`, `customElements`, `attachShadow`, `structuredClone` and `crypto.randomUUID`.
 - **Async timeout only.** `--timeout` won't kill a synchronous `while(true){}` (shared event loop). For a hard ceiling, wrap in shell `timeout`: `timeout 5s domdomdom ...`.
 - **No bare specifiers** in `<script type="module">`. Relative imports work.
 - **Stack traces** point at evaluated-script offsets, not the user's `.ts` source.
@@ -130,5 +157,8 @@ domdomdom is significantly cheaper than a real browser: no binary, no process, ~
 ## When things go wrong
 
 - **`ok: true` but `result: undefined`** — user's code didn't return. In multi-statement code, `return` is required.
+- **A plausible result from a page you expected to exist** — check `status`. A 404 returns the site's not-found HTML with `ok: true` and exit 0. Re-run with `--fail`.
 - **`error.kind: "setup"`** — bad input: missing file, both `--html` and a positional source, malformed URL.
+- **`error.kind: "http"` / exit 4** — `--fail` was passed and the page was non-2xx. Your JS did not run.
+- **An empty list from a page that clearly has items** — likely `IntersectionObserver` (see Limits): the content is lazy-loaded and never triggers. Use `browsebrowsebrowse` (`bbb`).
 - **Empty `logs` unexpectedly** — check whether `--no-console` was passed.

@@ -29,16 +29,46 @@ export interface EvaluateOptions {
   viewport?: { width: number; height: number }
   /** If true, console.* calls are dropped instead of captured. */
   quietConsole?: boolean
+  /**
+   * Opt in to `curl --fail` behaviour: a non-2xx main-document status becomes a
+   * failure instead of a page to scrape, and the user's code is never run.
+   * Off by default — a 404 body is perfectly legitimate to query.
+   */
+  failOnHttpError?: boolean
 }
 
 export type EvaluateError =
   | { kind: 'eval'; message: string; stack?: string }
   | { kind: 'timeout'; message: string }
   | { kind: 'setup'; message: string; stack?: string }
+  | { kind: 'http'; message: string; status: number }
 
+/**
+ * `status` is the main document's **final** HTTP status, after redirects, and
+ * `null` whenever there was no HTTP request to have one: `--html`, a local
+ * file, `about:blank`. The key is always present rather than conditionally
+ * omitted — one shape is easier to parse than two.
+ */
 export type EvaluateResult =
-  | { ok: true; result: unknown; logs: ConsoleEntry[] }
-  | { ok: false; error: EvaluateError; logs: ConsoleEntry[] }
+  | { ok: true; result: unknown; logs: ConsoleEntry[]; status: number | null }
+  | { ok: false; error: EvaluateError; logs: ConsoleEntry[]; status: number | null }
+
+/**
+ * Is this status one `--fail` should refuse? Mirrors `curl --fail`: 2xx passes,
+ * everything else does not. A `null` status means there was no HTTP request at
+ * all, and there is nothing to fail on.
+ *
+ * Shared verbatim with browsebrowsebrowse's `src/pure/http.ts` — the two CLIs
+ * publish one exit-code contract and it has to mean the same thing in both.
+ */
+export function isHttpFailure(status: number | null): boolean {
+  return status !== null && (status < 200 || status > 299)
+}
+
+/** The message carried by an `http` error. Same wording in both tools. */
+export function httpErrorMessage(status: number, url: string): string {
+  return `HTTP ${status} for ${url}`
+}
 
 interface PendingScript {
   src: string
@@ -289,12 +319,13 @@ async function safeClose(browser: { close(): Promise<void> }): Promise<void> {
   }
 }
 
-function setupError(e: unknown, logs: ConsoleEntry[]): EvaluateResult {
+function setupError(e: unknown, logs: ConsoleEntry[], status: number | null): EvaluateResult {
   const err = e as { message?: string; stack?: string }
   return {
     ok: false,
     error: { kind: 'setup', message: err.message ?? String(e), stack: err.stack },
     logs,
+    status,
   }
 }
 
@@ -313,6 +344,9 @@ export async function evaluate(
 ): Promise<EvaluateResult> {
   const logs: ConsoleEntry[] = []
   const timeoutMs = opts.timeout ?? 5000
+  // The main document's final HTTP status, or null when nothing was fetched
+  // over HTTP (inline --html, a local file, about:blank).
+  let status: number | null = null
 
   // For local-file evaluation, route `<script type="module" src="./x.js">`
   // imports through happy-dom's fetch layer by mapping a synthetic origin to
@@ -366,7 +400,12 @@ export async function evaluate(
       page.content = stripped
     } else if (opts.source) {
       if (ABS_URL_RE.test(opts.source)) {
-        await page.goto(opts.source)
+        // happy-dom's goto() hands back the Response it already fetched — so
+        // this is the status of the navigation itself, after any redirects, and
+        // costs no second request. It is null for navigations that never issue
+        // one (about:, javascript:, a same-document hash change).
+        const response = await page.goto(opts.source)
+        status = response?.status ?? null
       } else {
         const path = resolve(opts.source)
         const html = readFileSync(path, 'utf8')
@@ -379,6 +418,26 @@ export async function evaluate(
       }
     }
 
+    // Failing fast is the whole point of --fail: once the status is known to be
+    // bad, don't inject, don't wait for the page to settle, and don't run the
+    // user's code. The document itself has already been parsed by goto(), which
+    // is unavoidable — the status arrives with it.
+    if (opts.failOnHttpError && isHttpFailure(status)) {
+      const code = status as number
+      // Snapshot the logs *before* closing. Tearing the browser down while the
+      // document's subresources are still in flight aborts every one of them,
+      // and each abort arrives as a console error — artefacts of our own
+      // bail-out, not of the page. On a real 404 that was ~120 spurious lines.
+      const result: EvaluateResult = {
+        ok: false,
+        error: { kind: 'http', status: code, message: httpErrorMessage(code, opts.source as string) },
+        logs: logs.slice(),
+        status,
+      }
+      await safeClose(browser)
+      return result
+    }
+
     for (const f of opts.inject ?? []) {
       const path = resolve(baseDir, f)
       page.evaluate(readFileSync(path, 'utf8'))
@@ -387,7 +446,7 @@ export async function evaluate(
     await page.waitUntilComplete()
   } catch (e) {
     await safeClose(browser)
-    return setupError(e, logs)
+    return setupError(e, logs, status)
   }
 
   const window = page.mainFrame.window
@@ -412,7 +471,7 @@ export async function evaluate(
     window.document.head.appendChild(runner)
   } catch (e) {
     await safeClose(browser)
-    return setupError(e, logs)
+    return setupError(e, logs, status)
   }
 
   // page.waitUntilComplete() resolves when the script tag's synchronous body
@@ -438,6 +497,7 @@ export async function evaluate(
       ok: false,
       error: { kind: 'timeout', message: `Evaluation timed out after ${timeoutMs}ms` },
       logs,
+      status,
     }
   }
 
@@ -449,11 +509,12 @@ export async function evaluate(
       ok: false,
       error: { kind: 'eval', message: e.message ?? String(err), stack: e.stack },
       logs,
+      status,
     }
   }
   const result = w[resultKey]
   await safeClose(browser)
-  return { ok: true, result, logs }
+  return { ok: true, result, logs, status }
 }
 
 /**

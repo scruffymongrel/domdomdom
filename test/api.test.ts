@@ -8,7 +8,7 @@ const fixture = (name: string): string => resolve(fixtureDir, name)
 describe('evaluate()', () => {
   test('returns expression result', async () => {
     const r = await evaluate('return 1 + 2')
-    expect(r).toEqual({ ok: true, result: 3, logs: [] })
+    expect(r).toEqual({ ok: true, result: 3, logs: [], status: null })
   })
 
   test('reads document.title from inline html', async () => {

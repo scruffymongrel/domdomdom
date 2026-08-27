@@ -181,6 +181,10 @@ JS on stdin, `--json` producing one line of `{ok, result, logs, status}`,
 `1` eval / `2` timeout / `3` setup / `4` http. An agent that can drive one drives
 the other with no new rules. **Don't drift that surface without changing both.**
 
+`--prevent-timer-loops` is deliberately **not** part of that contract: it
+toggles a happy-dom setting that has no Chrome analogue, so it is
+domdomdom-only, like `--html` and `--inject`. Don't "sync" it to `bbb`.
+
 `isHttpFailure()` and `httpErrorMessage()` are duplicated verbatim in `bbb`'s
 `src/pure/http.ts`. A shared package between the two repos would be a third
 thing to version for two functions; the duplication is the cheaper trade, but it
@@ -198,6 +202,35 @@ only works if you change both.
   document's subresources are in flight aborts every one of them, and each
   abort arrives as a `console.error` — ~120 spurious lines on a real GitHub 404.
   The `--fail` path snapshots `logs` *before* `safeClose()` for that reason.
+- **`preventTimerLoops` is OFF, deliberately — don't reinstate it as
+  "hardening".** happy-dom's guard fingerprints every `setTimeout` /
+  `requestAnimationFrame` call by its `new Error().stack` string and, on the
+  second call from a byte-identical stack, returns `{}`: no timer created, no
+  error thrown, the promise never settles. A stack is a *call site*, not a
+  runaway loop, so ordinary code is what it kills — a bare happy-dom `Window`
+  running 20 sequential awaited `setTimeout`s from one line completes 20/20
+  with the guard off and hangs at exactly **2/20** with it on. htmx 4 awaits
+  `this.timeout(settleDelay)` from a single call site on every id-matched swap,
+  so an htmx page doing repeat swaps from one code path (a poller,
+  `hx-trigger every`, a re-entered handler) hung its whole request pipeline.
+  The line arrived uncommented in the squashed initial commit, was not one of
+  that commit's enumerated fixes, and is a deviation from happy-dom's own
+  default (`lib/browser/DefaultBrowserSettings.js`: `preventTimerLoops: false`).
+  It is now `opts.preventTimerLoops ?? false`, opt-in via `--prevent-timer-loops`.
+
+  **`--timeout` is the safety net, and it is the right one.** The race at the
+  end of `evaluate()` uses the *host* `setTimeout`, so it fires regardless of
+  what the page's own timers are doing: a tight self-rescheduling rAF chain and
+  a permanent `setInterval` poller both return a clean `kind: "timeout"` just
+  past the budget (measured 2.12s and 2.14s against 2000ms). Tests in
+  `test/api.test.ts`'s `timers` block hold both ends of this down.
+
+  happy-dom's finer-grained caps — `maxTimeout`, `maxIntervalTime`,
+  `maxIntervalIterations` — are dedup-free and would not have this failure
+  mode, but they are **deliberately not surfaced and not defaulted on**: they
+  all default to `-1` upstream, and a cap that silently truncates a legitimate
+  long poll reintroduces exactly the silent-wrong-answer failure this fix
+  removes. A bounded wait with an honest error beats a quietly short one.
 - `extractLocalScripts()` matches raw text, not a parsed DOM. It has to stay
   comment-aware in both directions: don't execute a commented-out
   `<script src>`, and don't treat `<!--` inside a script body or an attribute

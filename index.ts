@@ -10,6 +10,18 @@ export interface ConsoleEntry {
   message: string
 }
 
+/**
+ * happy-dom's per-call-site cap for `preventTimerLoops`: how many times one
+ * call site may schedule a timer before further calls are dropped. Mirrors
+ * happy-dom's own `IOptionalTimerLoopsLimit` structurally rather than importing
+ * it — happy-dom publishes no `exports` map, so importing the type means a deep
+ * path into its `lib/` that would end up in our published `.d.ts`.
+ */
+export interface TimerLoopLimits {
+  timeout?: number
+  requestAnimationFrame?: number
+}
+
 export interface EvaluateOptions {
   /** URL (http/https) or local file path. Mutually exclusive with `html`. */
   source?: string
@@ -35,6 +47,18 @@ export interface EvaluateOptions {
    * Off by default — a 404 body is perfectly legitimate to query.
    */
   failOnHttpError?: boolean
+  /**
+   * happy-dom's timer-loop guard: drop timers scheduled repeatedly from the
+   * same call site. **Off by default**, matching happy-dom's own default — it
+   * fingerprints call sites by `new Error().stack`, so an ordinary sequential
+   * loop (`for (...) await new Promise(r => setTimeout(r, 1))`) is
+   * indistinguishable from a runaway one and stops dead after the first
+   * iteration, silently: no timer, no error, a promise that never settles.
+   * `timeout` is the safety net instead — it is a host timer and fires whatever
+   * the page is doing. Pass `true` for happy-dom's one-per-call-site cap, or an
+   * object to raise it per timer kind.
+   */
+  preventTimerLoops?: boolean | TimerLoopLimits
 }
 
 export type EvaluateError =
@@ -372,7 +396,8 @@ export async function evaluate(
         ? { virtualServers: [{ url: LOCAL_HOST, directory: moduleDir }] }
         : {}),
     },
-    timer: { preventTimerLoops: true },
+    // Off by default (happy-dom's own default too). See EvaluateOptions.
+    timer: { preventTimerLoops: opts.preventTimerLoops ?? false },
     navigation: { beforeContentCallback: setupWindow },
   }
   if (opts.userAgent) settings.navigator = { userAgent: opts.userAgent }

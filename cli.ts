@@ -27,6 +27,8 @@ Other options:
   --user-agent <ua>         override navigator.userAgent
   --viewport <WxH>          override page viewport, e.g. 1024x768
   --timeout <ms>            time limit; 0 disables; default 5000
+  --prevent-timer-loops     drop timers rescheduled from the same call site
+                            (happy-dom's guard; off by default, see below)
   --fail                    treat a non-2xx page as an error (like curl --fail)
   --no-console              drop console.* output instead of capturing it
   --json                    emit a single JSON line: { ok, result?, error?, logs, status }
@@ -45,6 +47,13 @@ HTTP status:
   redirects, or null for --html, a local file or about:blank. WITHOUT --fail a
   404 still exits 0 with ok:true — check "status", not the exit code.
 
+Timers:
+  setTimeout/setInterval/requestAnimationFrame run normally; a page that never
+  stops polling is caught by --timeout (exit 2). --prevent-timer-loops turns on
+  happy-dom's loop guard, which fingerprints each call SITE by its stack and
+  silently drops repeat timers from it — that also kills ordinary sequential
+  awaited timers, so it is opt-in.
+
 Limits:
   Synchronous infinite loops in user code block the timeout (host event loop
   shared with the page). Wrap in shell timeout for hard cap: timeout 5s domdomdom ...
@@ -59,6 +68,7 @@ interface Args {
   userAgent: string | undefined
   viewport: { width: number; height: number } | undefined
   timeout: number
+  preventTimerLoops: boolean
   quietConsole: boolean
   fail: boolean
   json: boolean
@@ -122,6 +132,7 @@ function parseCli(argv: string[]): Args {
       'user-agent': { type: 'string' },
       viewport: { type: 'string' },
       timeout: { type: 'string' },
+      'prevent-timer-loops': { type: 'boolean' },
       'no-console': { type: 'boolean' },
       fail: { type: 'boolean' },
       json: { type: 'boolean' },
@@ -136,6 +147,7 @@ function parseCli(argv: string[]): Args {
     userAgent: values['user-agent'],
     viewport: values.viewport ? parseViewport(values.viewport) : undefined,
     timeout: values.timeout != null ? Number(values.timeout) : 5000,
+    preventTimerLoops: !!values['prevent-timer-loops'],
     quietConsole: !!values['no-console'],
     fail: !!values.fail,
     json: !!values.json,
@@ -255,6 +267,7 @@ export async function runCli(io: CliIO): Promise<number> {
     viewport: args.viewport,
     quietConsole: args.quietConsole,
     failOnHttpError: args.fail,
+    preventTimerLoops: args.preventTimerLoops,
   }
   if (args.html != null) opts.html = args.html
   else if (args.positional != null) opts.source = args.positional

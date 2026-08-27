@@ -192,6 +192,92 @@ describe('evaluate()', () => {
     expect(r.ok && r.result).toBe('ok')
   })
 
+  // happy-dom ships a `preventTimerLoops` guard that fingerprints each call
+  // site by its `new Error().stack` and, from the second call with a
+  // byte-identical stack, returns `{}`: no timer created, no error thrown, a
+  // promise that never settles. An ordinary sequential loop is exactly that
+  // shape — one line, scheduling over and over — so it died at 2 iterations.
+  // The guard is off by default here (happy-dom's own default too) and
+  // `timeout` is the safety net instead: a *host* timer, so it fires whatever
+  // the page's own timers are doing. See AGENTS.md.
+  describe('timers', () => {
+    // One `setTimeout(...)` on one line, awaited 20 times. The exact case that
+    // hung, and the reason the guard cannot be on by default.
+    const sequential = (n: number): string =>
+      `let count = 0
+       for (let i = 0; i < ${n}; i++) {
+         await new Promise(done => setTimeout(done, 1))
+         count++
+       }
+       return count`
+
+    test('20 sequential awaited setTimeouts from one call site all fire', async () => {
+      const r = await evaluate(sequential(20), { timeout: 3000 })
+      expect(r.ok && r.result).toBe(20)
+    })
+
+    test('repeated requestAnimationFrame from one call site keeps firing', async () => {
+      const r = await evaluate(
+        `let count = 0
+         for (let i = 0; i < 10; i++) {
+           await new Promise(done => requestAnimationFrame(done))
+           count++
+         }
+         return count`,
+        { timeout: 3000 },
+      )
+      expect(r.ok && r.result).toBe(10)
+    })
+
+    test('preventTimerLoops: true opts back into the cap (and the loop hangs)', async () => {
+      const r = await evaluate(sequential(20), { timeout: 300, preventTimerLoops: true })
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error.kind).toBe('timeout')
+    })
+
+    test("preventTimerLoops accepts happy-dom's per-kind limits object", async () => {
+      // Four iterations under a cap of five completes; `true` means a cap of
+      // one, and the same four iterations hang.
+      const raised = await evaluate(sequential(4), {
+        timeout: 2000,
+        preventTimerLoops: { timeout: 5 },
+      })
+      expect(raised.ok && raised.result).toBe(4)
+
+      const capped = await evaluate(sequential(4), { timeout: 300, preventTimerLoops: true })
+      expect(capped.ok).toBe(false)
+    })
+
+    // The flip's whole safety argument: with no cap, a page that never stops
+    // scheduling is bounded by `timeout` alone. A tight self-rescheduling rAF
+    // chain is the worst case — it reschedules from inside the frame callback,
+    // as fast as happy-dom will let it — and the host timer still wins.
+    test('a runaway rAF chain still ends in kind:"timeout", not a hang', async () => {
+      const t0 = performance.now()
+      const r = await evaluate(
+        `const spin = () => requestAnimationFrame(spin)
+         spin()
+         return await new Promise(() => {})`,
+        { timeout: 500 },
+      )
+      const elapsed = performance.now() - t0
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error.kind).toBe('timeout')
+      expect(elapsed).toBeGreaterThanOrEqual(500)
+      expect(elapsed).toBeLessThan(3000)
+    })
+
+    test('a permanent setInterval poller is bounded by timeout too', async () => {
+      const r = await evaluate(
+        `setInterval(() => { window.__ticks = (window.__ticks ?? 0) + 1 }, 1)
+         return await new Promise(() => {})`,
+        { timeout: 400 },
+      )
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error.kind).toBe('timeout')
+    })
+  })
+
   test('runner appendChild failure -> setup error', async () => {
     const r = await evaluate('return 1', { inject: [fixture('break-head.js')] })
     expect(r.ok).toBe(false)

@@ -189,6 +189,23 @@ describe('runCli()', () => {
     expect(r.stderr).toContain('--viewport')
   })
 
+  // happy-dom's timer-loop guard is off by default (see AGENTS.md); this flag
+  // is the way back to it. Passing it must actually change behaviour, or the
+  // flag is decoration.
+  test('--prevent-timer-loops opts back into happy-dom\'s timer cap', async () => {
+    const loop = `let n = 0
+      for (let i = 0; i < 20; i++) { await new Promise(done => setTimeout(done, 1)); n++ }
+      return n`
+
+    const off = await invoke(['--timeout', '3000'], loop)
+    expect(off.exit).toBe(0)
+    expect(off.stdout.trim()).toBe('20')
+
+    const on = await invoke(['--timeout', '300', '--prevent-timer-loops'], loop)
+    expect(on.exit).toBe(2)
+    expect(on.stderr).toContain('TIMEOUT')
+  })
+
   test('object result is JSON-pretty', async () => {
     const r = await invoke([], 'return { a: 1, b: [2, 3] }')
     expect(r.exit).toBe(0)

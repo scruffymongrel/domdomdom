@@ -108,7 +108,7 @@ echo 'return await fetch("/api/x").then(r => r.json())' \
 
 ## Useful flags
 
-`--fail` (non-2xx is an error, exit 4) &middot; `--inject <f>` (preload, repeatable) &middot; `--script <f>` (code from file) &middot; `--module` (ESM) &middot; `--user-agent <s>` &middot; `--no-console` (drop logs) &middot; `--viewport WxH`. Run `domdomdom --help` for the full list.
+`--fail` (non-2xx is an error, exit 4) &middot; `--inject <f>` (preload, repeatable) &middot; `--script <f>` (code from file) &middot; `--module` (ESM) &middot; `--user-agent <s>` &middot; `--no-console` (drop logs) &middot; `--viewport WxH` &middot; `--prevent-timer-loops` (see Timers). Run `domdomdom --help` for the full list.
 
 ## XPath works (no flag)
 
@@ -149,7 +149,8 @@ domdomdom is significantly cheaper than a real browser: no binary, no process, ~
   - `document.elementFromPoint()` returns `null` (it is a layout question).
   - `isSecureContext` is absent — a bare reference is a `ReferenceError`, not `undefined`. Guard with `typeof isSecureContext`.
 
-  Verified working, so don't avoid the tool for these: `MutationObserver` fires, `requestAnimationFrame` fires, `matchMedia` evaluates correctly, plus `localStorage`, `customElements`, `attachShadow`, `structuredClone` and `crypto.randomUUID`.
+  Verified working, so don't avoid the tool for these: `MutationObserver` fires, `requestAnimationFrame` fires — **repeatedly**, including a self-rescheduling chain (see Timers) — `matchMedia` evaluates correctly, plus `localStorage`, `customElements`, `attachShadow`, `structuredClone` and `crypto.randomUUID`.
+- **Timers are uncapped; `--timeout` is the bound.** `setTimeout`, `setInterval` and `requestAnimationFrame` all run normally, so a page with a permanent poller or a rAF spinner **never goes idle** — you get a clean `kind: "timeout"` / exit 2 when `--timeout` expires, not an early answer. Budget `--timeout` for the wait you're willing to do. (`--prevent-timer-loops` turns on happy-dom's loop guard, which fingerprints each call *site* by its stack and silently drops repeat timers from it. That also kills ordinary sequential awaited timers and htmx's settle step, which is why it is off by default.)
 - **Async timeout only.** `--timeout` won't kill a synchronous `while(true){}` (shared event loop). For a hard ceiling, wrap in shell `timeout`: `timeout 5s domdomdom ...`.
 - **No bare specifiers** in `<script type="module">`. Relative imports work.
 - **Stack traces** point at evaluated-script offsets, not the user's `.ts` source.
@@ -160,5 +161,6 @@ domdomdom is significantly cheaper than a real browser: no binary, no process, ~
 - **A plausible result from a page you expected to exist** — check `status`. A 404 returns the site's not-found HTML with `ok: true` and exit 0. Re-run with `--fail`.
 - **`error.kind: "setup"`** — bad input: missing file, both `--html` and a positional source, malformed URL.
 - **`error.kind: "http"` / exit 4** — `--fail` was passed and the page was non-2xx. Your JS did not run.
+- **`kind: "timeout"` on a page that polls** — expected, not a bug: an endless `setInterval`/rAF page never settles, so the timeout is the answer. Raise `--timeout`, or return early from your snippet instead of awaiting the page.
 - **An empty list from a page that clearly has items** — likely `IntersectionObserver` (see Limits): the content is lazy-loaded and never triggers. Use `browsebrowsebrowse` (`bbb`).
 - **Empty `logs` unexpectedly** — check whether `--no-console` was passed.

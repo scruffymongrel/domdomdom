@@ -102,4 +102,30 @@ describe('xpath', () => {
     )
     expect(r.ok && r.result).toEqual({ htmx: 'object', process: 'function' })
   })
+
+  // Booting is not the same as working. Every htmx swap whose new content
+  // shares an id with the target awaits `htmx.timeout(settleDelay)` — one
+  // `setTimeout` call site, hit once per swap. Under happy-dom's
+  // `preventTimerLoops` guard the second call from an identical stack returns
+  // `{}`: the settle promise never resolves and the request pipeline stops
+  // dead, silently. Two swaps issued from the *same* call site (a loop here; a
+  // poller or a repeated event handler in the wild) is the shape that hangs, so
+  // that is the shape this asserts. See AGENTS.md.
+  test('htmx 4 completes two id-matched swaps from one call site', async () => {
+    const r = await evaluate(
+      `const settled = []
+       document.addEventListener('htmx:after:settle', () => {
+         settled.push(document.getElementById('target').textContent.trim())
+       })
+       for (let i = 0; i < 2; i++) {
+         await window.htmx.ajax('GET', './htmx-fragment.html', {
+           target: '#target',
+           swap: 'innerHTML',
+         })
+       }
+       return settled`,
+      { source: fixture('htmx-page.html'), timeout: 5000 },
+    )
+    expect(r.ok && r.result).toEqual(['swapped', 'swapped'])
+  })
 })

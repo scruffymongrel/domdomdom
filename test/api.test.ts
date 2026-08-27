@@ -278,6 +278,31 @@ describe('evaluate()', () => {
     })
   })
 
+  // A timed-out evaluate() must leave nothing on the host event loop. This can
+  // only be observed from outside the process: in-process the test runner keeps
+  // the loop alive anyway, so a leaked poller looks identical to a clean exit.
+  // Before the fix the child below never exited — the completion loop spun on a
+  // doneKey that can never be set once the browser is closed.
+  test('a timed-out evaluate() lets the process exit', async () => {
+    const child = Bun.spawn(
+      [
+        'bun',
+        '-e',
+        `import { evaluate } from '${import.meta.dir}/../index.ts'
+         await evaluate('await new Promise(() => {}); return 1', { timeoutMs: 150, module: true })
+         console.log('returned')`,
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    )
+    const exited = await Promise.race([
+      child.exited,
+      new Promise<'HUNG'>(r => setTimeout(() => r('HUNG'), 8000)),
+    ])
+    if (exited === 'HUNG') child.kill()
+    expect(exited).toBe(0)
+    expect(await new Response(child.stdout).text()).toContain('returned')
+  }, 15000)
+
   test('runner appendChild failure -> setup error', async () => {
     const r = await evaluate('return 1', { inject: [fixture('break-head.js')] })
     expect(r.ok).toBe(false)

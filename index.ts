@@ -505,16 +505,28 @@ export async function evaluate(
   // against a host timer so async hangs (unresolved promises, slow fetches)
   // don't run forever. NB: synchronous busy loops in user code will block this
   // host timer too — wrap the CLI in `timeout 5s ...` for those.
+  // Both sides of the race must be released once it settles, or `evaluate()`
+  // returns while the host event loop still has work: the poller below spins
+  // forever after a timeout (doneKey can never be set once the browser is
+  // closed), and an un-cleared timer holds the loop for the rest of its budget.
+  // A CLI run hides this because runFromProcess() exits, but a library caller
+  // leaks one of each per timed-out call and the process never exits.
   const w = window as unknown as Record<string, unknown>
+  let abandoned = false
   const completion = (async (): Promise<'done'> => {
-    while (!w[doneKey]) await new Promise(r => setTimeout(r, 5))
+    while (!w[doneKey] && !abandoned) await new Promise(r => setTimeout(r, 5))
     return 'done'
   })()
+  let timerHandle: ReturnType<typeof setTimeout> | undefined
   const timer =
     timeoutMs > 0
-      ? new Promise<'timeout'>(r => setTimeout(() => r('timeout'), timeoutMs))
+      ? new Promise<'timeout'>(r => {
+          timerHandle = setTimeout(() => r('timeout'), timeoutMs)
+        })
       : new Promise<never>(() => {})
   const winner = await Promise.race([completion, timer])
+  if (timerHandle !== undefined) clearTimeout(timerHandle)
+  if (winner === 'timeout') abandoned = true
 
   if (winner === 'timeout') {
     await safeClose(browser)

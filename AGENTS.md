@@ -231,6 +231,20 @@ only works if you change both.
   all default to `-1` upstream, and a cap that silently truncates a legitimate
   long poll reintroduces exactly the silent-wrong-answer failure this fix
   removes. A bounded wait with an honest error beats a quietly short one.
+- **Both sides of the `evaluate()` race must be released, or the host event
+  loop never drains.** The completion side polls `while (!w[doneKey])` every
+  5ms; once the timer wins and `safeClose()` runs, `doneKey` can never be set,
+  so that loop spins forever. The timer side is the mirror image: uncleared, it
+  holds the loop for the rest of its budget after completion wins. Hence the
+  `abandoned` flag and the `clearTimeout`. **Don't remove either as dead code** —
+  the CLI hides the bug because `runFromProcess()` calls `process.exit`, so it
+  is invisible to every in-process test; a library caller leaks one poller per
+  timed-out call and the process never exits (measured: `evaluate()` returned,
+  the process was still alive at 2 minutes). Turning `preventTimerLoops` off
+  made this matter more, not less — never-idle pages now reach the timeout
+  instead of being silently stopped. `test/api.test.ts`'s "lets the process
+  exit" spawns a child precisely because in-process the runner keeps the loop
+  alive and a leak looks identical to a clean exit.
 - `extractLocalScripts()` matches raw text, not a parsed DOM. It has to stay
   comment-aware in both directions: don't execute a commented-out
   `<script src>`, and don't treat `<!--` inside a script body or an attribute

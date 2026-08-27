@@ -136,7 +136,7 @@ domdomdom is significantly cheaper than a real browser: no binary, no process, ~
 | Hard isolation for untrusted JS                   | a real sandbox (container, or Cloudflare Sandbox) — not a browser automation tool, which isn't a security boundary |
 | Parse HTML *without* executing scripts            | linkedom (faster) |
 
-[^bbb]: `browsebrowsebrowse` is a sibling headless-Chrome CLI — same author, same marketplace as domdomdom — built for the layout/interaction work domdomdom deliberately doesn't do. It's under active development and not yet published; don't expect it installable today.
+[^bbb]: `browsebrowsebrowse` is a sibling headless-Chrome CLI — same author, same marketplace as domdomdom — built for the layout/interaction work domdomdom deliberately doesn't do. Install it with `npm i -g browsebrowsebrowse` (or `bun add -g browsebrowsebrowse`), or run it with no install via `bunx browsebrowsebrowse`.
 
 ## Limits to remember
 

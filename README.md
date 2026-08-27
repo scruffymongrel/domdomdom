@@ -35,7 +35,7 @@ domdomdom is significantly cheaper than a real browser when both would work: no 
 | Parse HTML without executing scripts        | linkedom (faster)  |
 | Module bundling / build tooling             | bun build / esbuild |
 
-\* `browsebrowsebrowse` is a sibling headless-Chrome CLI — same author, same marketplace as domdomdom — for the layout/interaction work domdomdom deliberately doesn't do. It's under active development and not yet published.
+\* `browsebrowsebrowse` is a sibling headless-Chrome CLI — same author, same marketplace as domdomdom — for the layout/interaction work domdomdom deliberately doesn't do. It's published on npm and in the same marketplace: `npm i -g browsebrowsebrowse` (or `bun add -g`).
 
 ## Install
 
@@ -270,7 +270,7 @@ Verifying a built bundle exposes its export on `window` &middot; extracting stru
 
 ### When not to
 
-Layout or screenshots — use `browsebrowsebrowse` (`bbb`), a sibling headless-Chrome CLI (same author/marketplace, in development, not yet published). Click/scroll/type/navigation flows — same, `bbb`. The user's own real, logged-in browser session — claude-in-chrome. Untrusted-code isolation — a real sandbox (container, or Cloudflare Sandbox); browser automation tools aren't a security boundary.
+Layout or screenshots — use `browsebrowsebrowse` (`bbb`), a sibling headless-Chrome CLI (same author/marketplace; `npm i -g browsebrowsebrowse`). Click/scroll/type/navigation flows — same, `bbb`. The user's own real, logged-in browser session — claude-in-chrome. Untrusted-code isolation — a real sandbox (container, or Cloudflare Sandbox); browser automation tools aren't a security boundary.
 
 ## Limits
 

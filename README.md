@@ -101,6 +101,7 @@ domdomdom [options] [URL_OR_PATH]
 | `--user-agent`   | override `navigator.userAgent`                              |
 | `--viewport WxH` | override page viewport (e.g. `1024x768`)                    |
 | `--timeout <ms>` | time limit; `0` disables; default `5000`                    |
+| `--prevent-timer-loops` | opt into happy-dom's timer-loop guard; off by default (see [Timers](#timers)) |
 | `--fail`         | treat a non-2xx page as an error, like `curl --fail`        |
 | `--no-console`   | drop `console.*` output instead of capturing it             |
 | `--json`         | emit one JSON line: `{ ok, result?, error?, logs, status }` |
@@ -180,6 +181,8 @@ interface EvaluateOptions {
   viewport?: { width: number; height: number }
   quietConsole?: boolean  // drop console.* instead of capturing
   failOnHttpError?: boolean // non-2xx becomes an 'http' error; code never runs
+  preventTimerLoops?: boolean | { timeout?: number; requestAnimationFrame?: number }
+                          // happy-dom's timer-loop guard; off by default
 }
 
 // `status` is the main document's final HTTP status after redirects, and null
@@ -272,6 +275,36 @@ Verifying a built bundle exposes its export on `window` &middot; extracting stru
 
 Layout or screenshots — use `browsebrowsebrowse` (`bbb`), a sibling headless-Chrome CLI (same author/marketplace; `npm i -g browsebrowsebrowse`). Click/scroll/type/navigation flows — same, `bbb`. The user's own real, logged-in browser session — claude-in-chrome. Untrusted-code isolation — a real sandbox (container, or Cloudflare Sandbox); browser automation tools aren't a security boundary.
 
+## Timers
+
+`setTimeout`, `setInterval` and `requestAnimationFrame` run uncapped, and
+`--timeout` is what bounds them.
+
+happy-dom ships a `preventTimerLoops` guard that fingerprints every timer call
+by its `new Error().stack` and, from the **second** call with a byte-identical
+stack, returns without creating one — no timer, no error, a promise that never
+settles. Ordinary code has that shape: `for (…) await new Promise(r =>
+setTimeout(r, 1))` is one call site, and it stopped dead at 2 iterations. htmx 4
+awaits its settle delay from a single call site too, so a page doing repeat
+swaps from one code path (a poller, a repeated handler) hung its whole request
+pipeline. domdomdom therefore leaves the guard **off**, which is happy-dom's own
+default.
+
+The visible consequence: **a page with a permanent poller or a `requestAnimationFrame`
+spinner never goes idle**, so `--timeout` decides when you get an answer. That is
+a clean `kind: "timeout"` and exit `2` — a bounded wait with an honest error,
+instead of a silently dropped timer and a hang. Give such pages a `--timeout`
+you're happy to wait out.
+
+`--prevent-timer-loops` opts back in. The API takes limits as well as a boolean:
+`preventTimerLoops: { timeout: 5, requestAnimationFrame: 2 }` raises the
+per-call-site cap for each kind.
+
+> happy-dom's finer-grained caps (`maxTimeout`, `maxIntervalTime`,
+> `maxIntervalIterations`) are deliberately not surfaced. They all default to
+> `-1` (off) and truncating a legitimate long poll would put back exactly the
+> silently-wrong answer this removes; `--timeout` is the backstop.
+
 ## Limits
 
 - **No layout, and it fails silently rather than loudly.** happy-dom doesn't render, so `getBoundingClientRect()`, `offsetHeight` and `scrollHeight` return **`0`** — instantly, without throwing. Measured on a real page where Chrome reports `8670`, all three returned `0` in under 0.1ms. `getComputedStyle()` is unreliable in the same way: sometimes `''`, sometimes a default, rather than the real cascade. The danger is that these are *fast and confident*, so a layout-dependent assertion quietly passes or fails on a wrong number. For anything depending on rendered geometry, use `browsebrowsebrowse` (`bbb`) — the sibling headless-Chrome CLI for this class of task.
@@ -283,7 +316,7 @@ Layout or screenshots — use `browsebrowsebrowse` (`bbb`), a sibling headless-C
   - `document.elementFromPoint()` returns `null` (it is a layout question).
   - `isSecureContext` is absent entirely — a bare reference throws `ReferenceError` rather than being `undefined`. Guard with `typeof`.
 
-  What *does* work, so the tool isn't over-avoided: `MutationObserver` fires, `requestAnimationFrame` fires, `matchMedia` evaluates correctly, and `localStorage`, `customElements`, `attachShadow`, `structuredClone` and `crypto.randomUUID` all behave.
+  What *does* work, so the tool isn't over-avoided: `MutationObserver` fires, `requestAnimationFrame` fires — **repeatedly**, including a chain that reschedules itself (it used to fire only once per call site; see [Timers](#timers)) — `matchMedia` evaluates correctly, and `localStorage`, `customElements`, `attachShadow`, `structuredClone` and `crypto.randomUUID` all behave.
 - **Synchronous infinite loops.** `timeout` catches *async* hangs (long fetches, unresolved promises, slow setIntervals). It can't kill a `while(true){}` because the host event loop is shared with the page's V8 isolate. Wrap the CLI in `timeout 5s domdomdom ...` for a hard ceiling.
 - **Bare module specifiers.** `import 'lodash'` from inside a `<script type="module">` won't resolve — happy-dom needs a `resolveNodeModules` config, which we don't currently surface. Relative imports (`import './foo.js'`) work.
 - **Source maps.** Stack traces refer to evaluated-script offsets, not your original `.ts` files.

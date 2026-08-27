@@ -35,7 +35,7 @@ domdomdom is significantly cheaper than a real browser when both would work: no 
 | Parse HTML without executing scripts        | linkedom (faster)  |
 | Module bundling / build tooling             | bun build / esbuild |
 
-\* `browsebrowsebrowse` is a sibling headless-Chrome CLI — same author, same marketplace as domdomdom — for the layout/interaction work domdomdom deliberately doesn't do. It's under active development and not yet published.
+\* `browsebrowsebrowse` is a sibling headless-Chrome CLI — same author, same marketplace as domdomdom — for the layout/interaction work domdomdom deliberately doesn't do. It's published on npm and in the same marketplace: `npm i -g browsebrowsebrowse` (or `bun add -g`).
 
 ## Install
 
@@ -101,8 +101,9 @@ domdomdom [options] [URL_OR_PATH]
 | `--user-agent`   | override `navigator.userAgent`                              |
 | `--viewport WxH` | override page viewport (e.g. `1024x768`)                    |
 | `--timeout <ms>` | time limit; `0` disables; default `5000`                    |
+| `--fail`         | treat a non-2xx page as an error, like `curl --fail`        |
 | `--no-console`   | drop `console.*` output instead of capturing it             |
-| `--json`         | emit one JSON line: `{ ok, result?, error?, logs }`         |
+| `--json`         | emit one JSON line: `{ ok, result?, error?, logs, status }` |
 | `-h, --help`     | show help                                                   |
 
 ### Output contract
@@ -111,7 +112,23 @@ domdomdom [options] [URL_OR_PATH]
 
 **`--json`:** single line on stdout, nothing else. Captured logs included.
 
-**Exit codes:** `0` ok &middot; `1` eval error &middot; `2` timeout &middot; `3` setup/usage error.
+**Exit codes:** `0` ok &middot; `1` eval error &middot; `2` timeout &middot; `3` setup/usage error &middot; `4` HTTP error (`--fail` only).
+
+### HTTP status, and why the exit code is not a fetch check
+
+Every `--json` line carries `status`: the main document's **final** HTTP status, after redirects. It is `null` — not omitted — whenever nothing was fetched over HTTP (`--html`, a local file, `about:blank`), so the shape is the same either way.
+
+**Without `--fail`, a 404 is a success.** It exits `0` with `ok: true` and the not-found page's HTML in `result`, because a non-2xx body is still a page and querying it is a legitimate thing to do. The consequence is worth stating plainly: the exit code tells you whether *your JavaScript* ran, never whether the page was there.
+
+```sh
+echo 'document.title' | domdomdom --json https://example.com/nope
+# {"ok":true,"result":"Page not found","logs":[],"status":404}   exit 0
+
+echo 'document.title' | domdomdom --json --fail https://example.com/nope
+# {"ok":false,"error":{"kind":"http","status":404,"message":"HTTP 404 for https://example.com/nope"},"logs":[],"status":404}   exit 4
+```
+
+`--fail` is opt-in, and checks the status *before* evaluating your code — failing fast is the point, so on a non-2xx your JS never runs. It does nothing for sources that have no status.
 
 ### Examples
 
@@ -162,17 +179,28 @@ interface EvaluateOptions {
   userAgent?: string      // navigator.userAgent override
   viewport?: { width: number; height: number }
   quietConsole?: boolean  // drop console.* instead of capturing
+  failOnHttpError?: boolean // non-2xx becomes an 'http' error; code never runs
 }
 
+// `status` is the main document's final HTTP status after redirects, and null
+// when nothing was fetched over HTTP (html, a local file, about:blank).
 type EvaluateResult =
-  | { ok: true;  result: unknown; logs: ConsoleEntry[] }
-  | { ok: false; error: EvaluateError; logs: ConsoleEntry[] }
+  | { ok: true;  result: unknown; logs: ConsoleEntry[]; status: number | null }
+  | { ok: false; error: EvaluateError; logs: ConsoleEntry[]; status: number | null }
 
 type EvaluateError =
   | { kind: 'eval';    message: string; stack?: string }
   | { kind: 'timeout'; message: string }
   | { kind: 'setup';   message: string; stack?: string }
+  | { kind: 'http';    message: string; status: number }
 ```
+
+### `isHttpFailure(status)` / `httpErrorMessage(status, url)`
+
+The `--fail` decision and its wording, exported so a caller can apply the same
+rule. `isHttpFailure` is `curl --fail`'s: 2xx passes, everything else does not,
+and `null` (no HTTP request) is never a failure. Both are duplicated verbatim in
+`browsebrowsebrowse` — the two CLIs publish one contract.
 
 ### `toCloneable(value)`
 
@@ -220,7 +248,7 @@ cp -r ./skills/domdomdom <your-agent>/skills/
 
 For agents without skill support, paste this into your system prompt (covers ~90% of usage):
 
-> To execute JS against an HTML page, pipe code via stdin to `domdomdom --json --timeout <ms>` followed by the URL/path or `--html '<...>'`. Single-line expressions auto-`return`; multi-line code requires `return` explicitly. Parse stdout as JSON; check `.ok` first. Captured `console.*` output is in `logs[]`.
+> To execute JS against an HTML page, pipe code via stdin to `domdomdom --json --timeout <ms>` followed by the URL/path or `--html '<...>'`. Single-line expressions auto-`return`; multi-line code requires `return` explicitly. Parse stdout as JSON; check `.ok` first. Captured `console.*` output is in `logs[]`. A non-2xx page still returns `.ok: true` and exit 0 — read `.status` (the final HTTP status, `null` for non-HTTP sources), or pass `--fail` to turn a non-2xx into `.ok: false` with exit 4.
 
 ### Output contract for agents
 
@@ -228,13 +256,13 @@ Stdout is one JSON line. Branch on `.ok`:
 
 ```json
 // success
-{ "ok": true, "result": <any>, "logs": [{ "level": "log"|"warn"|"error"|"info"|"debug", "message": "..." }] }
+{ "ok": true, "result": <any>, "logs": [{ "level": "log"|"warn"|"error"|"info"|"debug", "message": "..." }], "status": <number|null> }
 
 // failure
-{ "ok": false, "error": { "kind": "eval"|"timeout"|"setup", "message": "...", "stack": "..." }, "logs": [...] }
+{ "ok": false, "error": { "kind": "eval"|"timeout"|"setup"|"http", "message": "...", "stack": "..." }, "logs": [...], "status": <number|null> }
 ```
 
-Exit codes (`0` ok / `1` eval / `2` timeout / `3` setup) give a cheap pre-check before parsing.
+Exit codes (`0` ok / `1` eval / `2` timeout / `3` setup / `4` HTTP) give a cheap pre-check before parsing — for *evaluation*. They say nothing about the HTTP response: **without `--fail` a 404 is `ok: true` and exit 0**, so read `status`, or pass `--fail` and let exit 4 mean it.
 
 ### When to reach for it
 
@@ -242,12 +270,20 @@ Verifying a built bundle exposes its export on `window` &middot; extracting stru
 
 ### When not to
 
-Layout or screenshots — use `browsebrowsebrowse` (`bbb`), a sibling headless-Chrome CLI (same author/marketplace, in development, not yet published). Click/scroll/type/navigation flows — same, `bbb`. The user's own real, logged-in browser session — claude-in-chrome. Untrusted-code isolation — a real sandbox (container, or Cloudflare Sandbox); browser automation tools aren't a security boundary.
+Layout or screenshots — use `browsebrowsebrowse` (`bbb`), a sibling headless-Chrome CLI (same author/marketplace; `npm i -g browsebrowsebrowse`). Click/scroll/type/navigation flows — same, `bbb`. The user's own real, logged-in browser session — claude-in-chrome. Untrusted-code isolation — a real sandbox (container, or Cloudflare Sandbox); browser automation tools aren't a security boundary.
 
 ## Limits
 
-- **No layout.** `getComputedStyle().getPropertyValue('height')` returns `''` for unstyled elements. happy-dom doesn't render. For layout-dependent assertions, use `browsebrowsebrowse` (`bbb`) — the sibling headless-Chrome CLI for this class of task.
+- **No layout, and it fails silently rather than loudly.** happy-dom doesn't render, so `getBoundingClientRect()`, `offsetHeight` and `scrollHeight` return **`0`** — instantly, without throwing. Measured on a real page where Chrome reports `8670`, all three returned `0` in under 0.1ms. `getComputedStyle()` is unreliable in the same way: sometimes `''`, sometimes a default, rather than the real cascade. The danger is that these are *fast and confident*, so a layout-dependent assertion quietly passes or fails on a wrong number. For anything depending on rendered geometry, use `browsebrowsebrowse` (`bbb`) — the sibling headless-Chrome CLI for this class of task.
 - **`innerText` is a performance cliff — reach for `textContent`.** `innerText` is layout-dependent by definition, so with no layout engine it degrades badly on a large subtree. Measured on a single 16KB element: `textContent` **1.5s** vs `innerText` **28s** (~18x); the same `innerText` call under `bbb` takes 2.4s. `textContent` is the right default — and needing real `innerText` semantics on a big element is itself a reason to use `bbb`.
+- **Present but inert — feature detection lies.** Several APIs exist, answer a `typeof` check, and then do nothing. Measured on a real page, contrasted against Chrome:
+  - **`IntersectionObserver` is a `function` and never fires.** The most valuable one to know. Lazy-loaded images, infinite scroll and reveal-on-scroll never trigger, so that content is simply absent — no error, no warning, just a shorter list that looks like a correct answer.
+  - `ResizeObserver` — identical: constructs, observes, never fires.
+  - `canvas.getContext('2d')` returns `null`.
+  - `document.elementFromPoint()` returns `null` (it is a layout question).
+  - `isSecureContext` is absent entirely — a bare reference throws `ReferenceError` rather than being `undefined`. Guard with `typeof`.
+
+  What *does* work, so the tool isn't over-avoided: `MutationObserver` fires, `requestAnimationFrame` fires, `matchMedia` evaluates correctly, and `localStorage`, `customElements`, `attachShadow`, `structuredClone` and `crypto.randomUUID` all behave.
 - **Synchronous infinite loops.** `timeout` catches *async* hangs (long fetches, unresolved promises, slow setIntervals). It can't kill a `while(true){}` because the host event loop is shared with the page's V8 isolate. Wrap the CLI in `timeout 5s domdomdom ...` for a hard ceiling.
 - **Bare module specifiers.** `import 'lodash'` from inside a `<script type="module">` won't resolve — happy-dom needs a `resolveNodeModules` config, which we don't currently surface. Relative imports (`import './foo.js'`) work.
 - **Source maps.** Stack traces refer to evaluated-script offsets, not your original `.ts` files.

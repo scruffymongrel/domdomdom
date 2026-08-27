@@ -173,8 +173,31 @@ bun run build        # compile dist/ (runs automatically via prepack)
 - **`dist/` is built, gitignored, and never hand-edited.** `prepack` builds it,
   so `npm pack` and `npm publish` always compile fresh. Source stays `.ts`.
 
+## The shared surface with browsebrowsebrowse
+
+`bbb` is the sibling headless-Chrome CLI, and the two publish **one** contract:
+JS on stdin, `--json` producing one line of `{ok, result, logs, status}`,
+`--timeout`, `--viewport`, `--user-agent`, `--fail`, and exit codes `0` ok /
+`1` eval / `2` timeout / `3` setup / `4` http. An agent that can drive one drives
+the other with no new rules. **Don't drift that surface without changing both.**
+
+`isHttpFailure()` and `httpErrorMessage()` are duplicated verbatim in `bbb`'s
+`src/pure/http.ts`. A shared package between the two repos would be a third
+thing to version for two functions; the duplication is the cheaper trade, but it
+only works if you change both.
+
 ## Things that bite in this codebase
 
+- **`page.goto()`'s return value is the only honest source of the HTTP status.**
+  happy-dom hands back the `Response` it already fetched, after redirects, so
+  reading `.status` from it costs nothing — and it is `null` for navigations
+  that issue no request (`about:blank`, `javascript:`, a hash change). Never add
+  a second request to "check" a URL: it is a different request and can get a
+  different answer.
+- **Bailing out mid-load floods `logs`.** Closing the browser while the
+  document's subresources are in flight aborts every one of them, and each
+  abort arrives as a `console.error` — ~120 spurious lines on a real GitHub 404.
+  The `--fail` path snapshots `logs` *before* `safeClose()` for that reason.
 - `extractLocalScripts()` matches raw text, not a parsed DOM. It has to stay
   comment-aware in both directions: don't execute a commented-out
   `<script src>`, and don't treat `<!--` inside a script body or an attribute

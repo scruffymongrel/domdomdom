@@ -2,14 +2,20 @@
 # The dist-target run of the same suite (`bun run test:dist`), which loads
 # ../dist/index.js and ../dist/cli.js instead of the .ts source.
 #
-# Coverage is off here, and that is the whole reason this file exists: the gate
-# in bunfig.toml is 100% lines+functions on index.ts and cli.ts, and under
-# DOMDOMDOM_TEST_DIST=1 neither of those files is ever loaded. The run would
-# report ~0% and fail on a threshold that says nothing about the built output.
-# The src run in bunfig.toml keeps the gate; this run checks behaviour.
+# Coverage is off here, and not for the obvious reason. It is tempting to think
+# a dist run reports ~0% because index.ts and cli.ts are never loaded — it does
+# not. Bun measures whatever files are *loaded*, and with no include list that
+# is the dist/ bundle, so it reports ~100% on bundler output and PASSES, while
+# gating a content-hashed chunk (dist/index-<hash>.js) whose filename changes
+# on every build. Green forever, asserting nothing about the source.
+# The src run under bunfig.toml is where the 100% threshold means something.
 #
-# NB: `bun test --config=bunfig.dist.toml` needs the `=`. With a space
-# (`--config bunfig.dist.toml`) bun silently ignores the file and applies
-# bunfig.toml instead — the only visible difference is a coverage table
-# appearing in the output.
+# NB: `--config` needs the `=`. Measured on bun 1.4.0 (34cbb9a40); the
+# behaviour has changed at least once, so re-measure before trusting this.
+# With a space, bun takes the path as a positional test-path filter and falls
+# back to bunfig.toml — it is neither silent nor green:
+#   --config=bunfig.dist.toml   -> applied, no coverage table, exit 0
+#   --config bunfig.dist.toml   -> filter matches no test files, exit 1
+# The danger is a space-form step wrapped in `|| true` or `continue-on-error`,
+# which turns "ran nothing" into green. Never soften a bun test step's exit.
 coverage = false

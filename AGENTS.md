@@ -14,7 +14,8 @@ gh workflow run release.yml -f bump=patch|minor|major
 gh run watch
 ```
 
-CI then runs: quality gate → Node smoke test → packed-tarball smoke test →
+CI then runs: quality gate → dist-target test suite → Node smoke test →
+packed-tarball smoke test →
 `npm version` (bump + `chore(release): vX.Y.Z` commit + annotated tag) → push →
 `npm publish` via Trusted Publishing (OIDC) → build the plugin channel and
 advance `release`.
@@ -121,6 +122,7 @@ of the automation is that the bump, tag and publish are inseparable.
 
 ```sh
 bun run quality      # tsc --noEmit + bun test (coverage gated, see bunfig.toml)
+bun run test:dist    # the same suite again, against the compiled dist/
 bun run smoke:node   # runs the CLI from the checkout under Node
 bun run smoke:pack   # packs, installs the tarball, runs it under Node, Bun AND Deno
 bun run build        # compile dist/ (runs automatically via prepack)
@@ -130,6 +132,47 @@ bun run build        # compile dist/ (runs automatically via prepack)
   `cli.ts` via `bunfig.toml`. New code needs tests or the build fails. Note the
   threshold keys are plural (`lines`/`functions`) — bun silently ignores the
   singular spellings, gating nothing.
+- **The suite is dual-target: it runs once against the source and once against
+  the shipped build.** Every test imports its subject from `test/subject.ts`
+  rather than from `../index.ts` / `../cli.ts` directly. That module re-exports
+  the public surface from either the `.ts` source or `dist/*.js`, switched by
+  `DOMDOMDOM_TEST_DIST=1`; its import specifiers are computed rather than
+  literal so `tsc` doesn't try to resolve `dist/`, which exists only after a
+  build. **A new test imports from `./subject.ts`.** Importing `../index.ts`
+  directly still compiles and still passes — it just quietly runs the source
+  under both targets, which is the failure mode this whole gate exists to
+  remove.
+
+  ```sh
+  bun run test:dist   # bun run build && DOMDOMDOM_TEST_DIST=1 bun test --config=bunfig.dist.toml
+  ```
+
+  Why it earns its place: `quality` has only ever exercised the `.ts` source
+  while npm ships compiled `dist/`, and that exact gap let a broken npm+Node
+  install survive three releases with CI green. `smoke:pack` proves the built
+  binary *runs*; this proves it still *behaves* — every assertion, not one
+  smoke assertion. Both `test.yml` and `release.yml` run it, per the invariant
+  above.
+
+  - **`subject.ts` exports `TARGET`** (`'src'` or `'dist'`). When a failure
+    reproduces under one target only, that constant is what tells you which.
+    It also exports `CLI_PATH` and `INDEX_PATH` — absolute paths to the module
+    actually under test — for the handful of tests that must *name* the file
+    rather than import it (spawning the bin as a child, symlinking it, feeding
+    it to `isEntrypoint()`). Hardcoding `resolve(ROOT, 'cli.ts')` in those is
+    the over-fit: under `DOMDOMDOM_TEST_DIST=1` it either fails outright
+    (`isEntrypoint`, which compares against its own `import.meta.url`) or, far
+    worse, passes by silently running the source in a dist run.
+  - **The dist run needs its own bunfig, and `--config` needs the `=`.**
+    `bunfig.toml`'s 100% threshold is meaningful only against the source; under
+    `DOMDOMDOM_TEST_DIST=1` neither `index.ts` nor `cli.ts` is loaded, so the
+    gate lands on bundler output including a content-hashed chunk whose name
+    changes every build. `bunfig.dist.toml` turns coverage off for that run;
+    the src run keeps the gate. `bun test --config=bunfig.dist.toml` applies
+    the file — `bun test --config bunfig.dist.toml`, with a space, does **not**
+    (bun 1.4 swallows the path as a test-name filter and matches nothing).
+    Proof the file is live: the `=` form prints no coverage table, the default
+    `bun test` does.
 - **The toolchain is Bun-only. Never add a step that requires Node locally.**
   Scripts run under `bun`, the build shells out to `bunx tsc`, and packing uses
   `bun pm pack` / `bun add` rather than npm. Node is a *target* runtime, not a

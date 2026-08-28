@@ -1,6 +1,6 @@
 import { test, expect, describe } from 'bun:test'
 import { resolve } from 'node:path'
-import { evaluate } from '../index.ts'
+import { evaluate } from './subject.ts'
 
 const fixture = (name: string): string => resolve(import.meta.dir, 'fixtures', name)
 

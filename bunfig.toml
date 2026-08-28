@@ -6,6 +6,11 @@
 # NB: the keys are plural (`lines`/`functions`). Bun silently ignores the
 # singular spellings, which looks enforced but gates nothing — verified by
 # adding an uncovered function and watching each variant's exit code.
+#
+# This is the *source* target's config. The dist-target run of the same suite
+# (`bun run test:dist`) uses bunfig.dist.toml, which turns coverage off — under
+# DOMDOMDOM_TEST_DIST=1 index.ts and cli.ts are never loaded, so this threshold
+# would be measuring bundler output instead. See AGENTS.md.
 coverage = true
 coverageSkipTestFiles = true
 coverageThreshold = { lines = 1.0, functions = 1.0 }

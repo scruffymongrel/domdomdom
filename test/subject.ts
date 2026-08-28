@@ -9,9 +9,13 @@
 //
 // The specifiers are computed rather than literal so tsc doesn't try to resolve
 // dist/, which exists only after a build.
+import { fileURLToPath } from 'node:url'
 import type { CliIO } from '../cli.ts'
 
 const useDist = process.env.DOMDOMDOM_TEST_DIST === '1'
+
+const indexSpecifier = useDist ? '../dist/index.js' : '../index.ts'
+const cliSpecifier = useDist ? '../dist/cli.js' : '../cli.ts'
 
 const index = (await import(
   useDist ? '../dist/index.js' : '../index.ts'
@@ -24,6 +28,20 @@ const cli = (await import(
 /** 'dist' or 'src' — handy when a failure only reproduces against one target. */
 export const TARGET = useDist ? 'dist' : 'src'
 
-export const { evaluate, toCloneable } = index
-export const { runCli, runFromProcess, isEntrypoint } = cli
+// Absolute paths to the two files actually under test. A handful of tests have
+// to name the module on disk rather than import it — spawning the binary as a
+// child process, symlinking it, feeding it to isEntrypoint() — and those must
+// point at whichever target this run is exercising.
+export const INDEX_PATH = fileURLToPath(new URL(indexSpecifier, import.meta.url))
+export const CLI_PATH = fileURLToPath(new URL(cliSpecifier, import.meta.url))
+
+export const { evaluate, toCloneable, isHttpFailure, httpErrorMessage } = index
+export const {
+  runCli,
+  runFromProcess,
+  isEntrypoint,
+  exitCodeFor,
+  resolvePackageVersion,
+  PACKAGE_VERSION,
+} = cli
 export type { CliIO }

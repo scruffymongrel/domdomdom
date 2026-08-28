@@ -16,6 +16,13 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - run: bun run quality
+      # The same suite again, against the compiled dist/ that npm actually
+      # ships. `quality` only ever exercised the .ts source — the gap that let
+      # a broken npm+Node install survive three releases. smoke:pack proves the
+      # built binary runs; this proves it still behaves, every assertion.
+      # Coverage is off for this run (bunfig.dist.toml); the src run above
+      # keeps the 100% gate.
+      - run: bun run test:dist
 
   # The suite above runs under Bun only, but Node is the target runtime — the
   # shipped bin's shebang is node (engines.node >=20.0.0, happy-dom's own

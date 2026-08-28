@@ -8,8 +8,10 @@ import {
   isEntrypoint,
   resolvePackageVersion,
   PACKAGE_VERSION,
+  CLI_PATH,
+  INDEX_PATH,
   type CliIO,
-} from '../cli.ts'
+} from './subject.ts'
 
 const ROOT = resolve(import.meta.dir, '..')
 
@@ -379,18 +381,21 @@ describe('isEntrypoint()', () => {
   test('false when argv[1] points at a non-existent path', () => {
     expect(isEntrypoint('/this/path/does/not/exist/anywhere.xyz')).toBe(false)
   })
-  test('true when argv[1] resolves to cli.ts', () => {
-    expect(isEntrypoint(resolve(ROOT, 'cli.ts'))).toBe(true)
+  // CLI_PATH/INDEX_PATH rather than literal cli.ts/index.ts: under
+  // DOMDOMDOM_TEST_DIST the module under test is dist/cli.js, and
+  // isEntrypoint() compares against *its own* import.meta.url.
+  test('true when argv[1] resolves to the CLI module', () => {
+    expect(isEntrypoint(CLI_PATH)).toBe(true)
   })
   test('false when argv[1] resolves to a different file', () => {
-    expect(isEntrypoint(resolve(ROOT, 'index.ts'))).toBe(false)
+    expect(isEntrypoint(INDEX_PATH)).toBe(false)
   })
 })
 
 describe('binary entry point', () => {
   test('runs via the shebang and produces output on stdout', async () => {
     const result = await new Promise<{ exit: number; stdout: string }>((res, rej) => {
-      const p = spawn('bun', [resolve(ROOT, 'cli.ts')], { cwd: ROOT })
+      const p = spawn('bun', [CLI_PATH], { cwd: ROOT })
       let stdout = ''
       p.stdout.on('data', d => { stdout += d.toString() })
       p.on('error', rej)
@@ -406,12 +411,12 @@ describe('binary entry point', () => {
     // Mirrors how `bun link` / `npm i -g` install the binary — the on-PATH
     // shim is a symlink into the package. Earlier we used a plain string
     // equality on the entry-point guard, which silently no-op'd under Node
-    // because the symlink path differs from the real cli.ts path.
+    // because the symlink path differs from the real CLI module's path.
     const { mkdtempSync, symlinkSync, rmSync } = await import('node:fs')
     const { tmpdir } = await import('node:os')
     const tmp = mkdtempSync(resolve(tmpdir(), 'domdomdom-symlink-'))
     const link = resolve(tmp, 'domdomdom')
-    symlinkSync(resolve(ROOT, 'cli.ts'), link)
+    symlinkSync(CLI_PATH, link)
     try {
       const result = await new Promise<{ exit: number; stdout: string }>((res, rej) => {
         const p = spawn('bun', [link], { cwd: ROOT })

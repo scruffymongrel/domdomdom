@@ -25,6 +25,7 @@
   ],
   "scripts": {
     "test": "bun test",
+    "test:dist": "bun run build && DOMDOMDOM_TEST_DIST=1 bun test --config=bunfig.dist.toml",
     "typecheck": "tsc --noEmit",
     "quality": "tsc --noEmit && bun test",
     "build": "bun scripts/build.mjs",

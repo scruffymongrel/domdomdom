@@ -6,8 +6,14 @@
 // against a real socket, because the interesting cases (a redirect chain, a
 // body served with a non-2xx status) are only interesting once HTTP is real.
 import { test, expect, describe, beforeAll, afterAll } from 'bun:test'
-import { evaluate, isHttpFailure, httpErrorMessage } from '../index.ts'
-import { exitCodeFor, runCli, type CliIO } from '../cli.ts'
+import {
+  evaluate,
+  isHttpFailure,
+  httpErrorMessage,
+  exitCodeFor,
+  runCli,
+  type CliIO,
+} from './subject.ts'
 import { startFixtures, type Fixtures } from './fixtures/server.ts'
 
 let fx: Fixtures

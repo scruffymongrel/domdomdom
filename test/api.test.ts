@@ -1,6 +1,6 @@
 import { test, expect, describe } from 'bun:test'
 import { resolve } from 'node:path'
-import { evaluate, toCloneable } from '../index.ts'
+import { evaluate, toCloneable, INDEX_PATH } from './subject.ts'
 
 const fixtureDir = resolve(import.meta.dir, 'fixtures')
 const fixture = (name: string): string => resolve(fixtureDir, name)
@@ -288,7 +288,7 @@ describe('evaluate()', () => {
       [
         'bun',
         '-e',
-        `import { evaluate } from '${import.meta.dir}/../index.ts'
+        `import { evaluate } from '${INDEX_PATH}'
          await evaluate('await new Promise(() => {}); return 1', { timeoutMs: 150, module: true })
          console.log('returned')`,
       ],

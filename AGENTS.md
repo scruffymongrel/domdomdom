@@ -4,14 +4,92 @@ Guidance for coding agents working in this repo. Lives here rather than in
 per-machine agent memory so it travels with the repo and applies in any
 checkout. `CLAUDE.md` is a symlink to this file.
 
+## Writing docs in this repo
+
+These rules govern the rest of this file, and the README, the skill, and the
+comments in the source. They are here because one session produced an unusual
+amount of drift, all of it in prose: a `--config` claim that was wrong on the
+current bun, a `bunfig.dist.toml` comment restating reasoning this file had
+already corrected, three "not yet published" claims about a package that had
+been on npm for hours, a skill asserting an alias didn't exist that had shipped,
+and a stale Node floor.
+
+- **A claim that can be a test shouldn't be a sentence.** Nearly all of that
+  drift was in *assertable* claims — things a machine could have checked. This
+  repo already does it in places: `engines.node` is asserted against happy-dom's
+  own `package.json` rather than written down, and `test/packaging.test.ts`
+  asserts the skill contains its install command. Generalise it. If prose
+  asserts something checkable — a version floor, a string that must appear in a
+  file, a flag that exists, an ordering of steps in a workflow — write the
+  check, and let the prose explain *why* it is that way. Prose that restates a
+  passing test cannot drift into a lie; prose that stands alone always can. The
+  reasoning is the half worth writing by hand, because it is the half no test
+  can hold.
+- **Stable part near the code, volatile part in one place.** The comment nearest
+  the code is the one that gets read, so it has to say something — but a claim
+  duplicated in two files drifts, and the copy that gets forgotten is the one
+  left wrong. Split by rate of change: the local comment carries the **rule**
+  ("coverage is off for this run — see AGENTS.md for why"), and AGENTS.md
+  carries the reasoning and the measurements. Rules are stable; reasoning rots.
+  `bunfig.dist.toml` is the concrete case that broke this way — it grew a second
+  full copy of the coverage and `--config` argument, so when the `--config`
+  behaviour turned out to be wrong there were two places to correct, and only
+  one of them was in front of anyone.
+- **Stamp a measured claim with what it was measured against.** The `--config`
+  note models the form: *"Measured on bun 1.4.0 (`34cbb9a40`); the behaviour has
+  evidently changed at least once, so re-measure before trusting this."* A
+  stamped claim invites re-measurement; an unstamped one invites belief, and the
+  next reader has no way to tell a fact from a fact that expired. Same for
+  anything time-relative: "unpublished as of 2026-08-26" beats "not yet
+  published", because it makes staleness visible instead of invisible.
+- **Don't assert another project's status when you can link to it.** The "not
+  yet published" claims were assertions about `browsebrowsebrowse` — a sibling
+  repo one directory away, with a canonical source of truth (its `package.json`,
+  its npm page, its `main`). Point at the source, or go and check it. Don't
+  snapshot it into prose here, where nothing will ever revisit it.
+
 ## Releasing to npm
 
 **Releases are normally the agent's to run, not the maintainer's.** The whole
 sequence is automated; drive it from the repo:
 
 ```sh
+bun run release patch|minor|major
+```
+
+**`scripts/release.mjs` is the documented path**, and it exists because the
+automation used to stop at the network boundary. `release.yml`'s own comment
+promises the release is "one sequence or none of it — nothing to remember,
+nothing to get out of order", and that was true of the *remote* half only. The
+local half was not automated at all, and failed two ways, both silently:
+
+- **Local `main` falls a commit behind.** `gh workflow run` returns the moment
+  the dispatch is accepted, and nothing pulls back the `chore(release)` commit
+  CI creates. Observed three times in one session: each time the next agent
+  built on a stale base and misreported the version, and each time it was caught
+  only because somebody happened to rebase.
+- **CI releases `origin/main`, not what you have.** If local is behind, you
+  publish a commit you never ran. If local is *ahead* — unpushed work — you
+  publish without it. Nothing says so either way.
+
+The wrapper's one real invariant closes both: it `git fetch`es and then refuses
+unless you are on `main`, the tree is clean, and `git rev-list --left-right
+--count origin/main...main` is `0 0` — naming which way they differ and what to
+run. Everything after that is convenience: it triggers the workflow, waits for
+that specific run (capturing the newest run id *before* dispatching, because a
+new run doesn't appear instantly and `gh run list` will otherwise hand back the
+*previous* release's), pulls the release commit back with `--ff-only`, and
+prints the published version and its npm URL. On a failed run it exits non-zero
+and does not pull.
+
+**The escape hatch is the raw dispatch**, for when the wrapper is in the way —
+re-running after a flaky CI step, or releasing from a checkout you can't get
+clean:
+
+```sh
 gh workflow run release.yml -f bump=patch|minor|major
 gh run watch
+git pull --ff-only origin main   # the wrapper's whole point; don't skip it
 ```
 
 CI then runs: quality gate → dist-target test suite → Node smoke test →

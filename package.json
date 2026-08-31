@@ -28,6 +28,7 @@
     "test:dist": "bun run build && DOMDOMDOM_TEST_DIST=1 bun test --config=bunfig.dist.toml",
     "typecheck": "tsc --noEmit",
     "quality": "tsc --noEmit && bun test",
+    "release": "bun scripts/release.mjs",
     "build": "bun scripts/build.mjs",
     "smoke:node": "bun scripts/smoke-node.mjs",
     "smoke:pack": "bun scripts/smoke-pack.mjs",

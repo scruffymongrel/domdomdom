@@ -1,6 +1,6 @@
 import { test, expect, describe } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
@@ -37,6 +37,44 @@ describe('packaging', () => {
     expect(readFileSync(resolve(root, 'scripts/build.mjs'), 'utf8')).toContain(
       '#!/usr/bin/env -S node',
     )
+  })
+
+  // The floor above is pinned to happy-dom's own package.json, but the docs
+  // restate the *number* by hand — and a hand-copied version is exactly what
+  // goes stale when the dependency raises its floor. (Rule 1 of "Writing docs
+  // in this repo": a claim that can be a test shouldn't be a sentence.)
+  test('the docs state the same Node floor as package.json', () => {
+    const floor = (read('package.json') as { engines: { node: string } }).engines.node
+    for (const doc of ['AGENTS.md', 'README.md']) {
+      expect(readFileSync(resolve(root, doc), 'utf8')).toContain(`node ${floor}`)
+    }
+    // The README's runtime table abbreviates ("Node ≥ 20"), so match the
+    // prefix rather than the whole version.
+    const abbrev =
+      readFileSync(resolve(root, 'README.md'), 'utf8').match(/Node ≥ ([\d.]+)/)?.[1] ?? ''
+    expect(abbrev).not.toBe('')
+    expect(floor.replace(/^>=/, '').startsWith(abbrev)).toBe(true)
+  })
+
+  // `bun run release` is the documented path and the raw `gh workflow run` is
+  // the escape hatch, because CI releases origin/main rather than what you
+  // have. If the script or the docs go, the invariant goes silently with them.
+  test('the release wrapper exists and is what the docs tell you to run', () => {
+    const pkg = read('package.json') as { scripts: Record<string, string> }
+    expect(pkg.scripts.release).toBe('bun scripts/release.mjs')
+    expect(existsSync(resolve(root, 'scripts/release.mjs'))).toBe(true)
+    for (const doc of ['AGENTS.md', 'README.md']) {
+      expect(readFileSync(resolve(root, doc), 'utf8')).toContain('bun run release patch|minor|major')
+    }
+  })
+
+  // The README quotes the threshold line verbatim, including the plural keys
+  // that are the whole trap (`line`/`function` are silently ignored). A quote
+  // that isn't checked is just a claim.
+  test('the README quotes bunfig.toml’s coverage threshold verbatim', () => {
+    const line = 'coverageThreshold = { lines = 1.0, functions = 1.0 }'
+    expect(readFileSync(resolve(root, 'bunfig.toml'), 'utf8')).toContain(line)
+    expect(readFileSync(resolve(root, 'README.md'), 'utf8')).toContain(line)
   })
 
   test('both bin aliases point at the built CLI', () => {

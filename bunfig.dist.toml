@@ -1,21 +1,8 @@
 [test]
-# The dist-target run of the same suite (`bun run test:dist`), which loads
-# ../dist/index.js and ../dist/cli.js instead of the .ts source.
+# Coverage is off for the dist-target run (`bun run test:dist`), which loads
+# ../dist/*.js instead of the .ts source.
 #
-# Coverage is off here, and not for the obvious reason. It is tempting to think
-# a dist run reports ~0% because index.ts and cli.ts are never loaded — it does
-# not. Bun measures whatever files are *loaded*, and with no include list that
-# is the dist/ bundle, so it reports ~100% on bundler output and PASSES, while
-# gating a content-hashed chunk (dist/index-<hash>.js) whose filename changes
-# on every build. Green forever, asserting nothing about the source.
-# The src run under bunfig.toml is where the 100% threshold means something.
-#
-# NB: `--config` needs the `=`. Measured on bun 1.4.0 (34cbb9a40); the
-# behaviour has changed at least once, so re-measure before trusting this.
-# With a space, bun takes the path as a positional test-path filter and falls
-# back to bunfig.toml — it is neither silent nor green:
-#   --config=bunfig.dist.toml   -> applied, no coverage table, exit 0
-#   --config bunfig.dist.toml   -> filter matches no test files, exit 1
-# The danger is a space-form step wrapped in `|| true` or `continue-on-error`,
-# which turns "ran nothing" into green. Never soften a bun test step's exit.
+# Why — and why the obvious reason for it is wrong — is in AGENTS.md, under
+# Checks. The `--config` flag needs the `=`; the measured behaviour of the
+# space form is documented there too.
 coverage = false

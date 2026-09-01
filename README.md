@@ -21,7 +21,7 @@ Each of these is a one-line fix once you've found it. Finding them took an after
 
 ## When to use this vs. alternatives
 
-domdomdom is significantly cheaper than a real browser when both would work: no binary, no process, ~100-300ms — versus a real browser's ~1s cold start and ~180MB engine.
+domdomdom is significantly cheaper than a real browser when both would work: no binary, no process, nothing to download. Measured 2026-09-01 on an Apple M2 (macOS 26.3.1, node 26.3.0, bun 1.4.0, domdomdom 0.5.0, browsebrowsebrowse 0.2.0, Chrome 152.0.7977.64), median of 5 runs against a trivial inline page: domdomdom **0.25s**, `bbb` **0.87s** cold — about **3.5x** — and `bbb` additionally wants a ~190MB Chrome engine on disk that domdomdom never fetches. That is the easiest possible page, so both figures are floors; re-measure on your own hardware before leaning on them. Every other measurement in this file carries its own date.
 
 | You want                                    | Use this           |
 | ------------------------------------------- | ------------------ |
@@ -307,9 +307,13 @@ per-call-site cap for each kind.
 
 ## Limits
 
-- **No layout, and it fails silently rather than loudly.** happy-dom doesn't render, so `getBoundingClientRect()`, `offsetHeight` and `scrollHeight` return **`0`** — instantly, without throwing. Measured on a real page where Chrome reports `8670`, all three returned `0` in under 0.1ms. `getComputedStyle()` is unreliable in the same way: sometimes `''`, sometimes a default, rather than the real cascade. The danger is that these are *fast and confident*, so a layout-dependent assertion quietly passes or fails on a wrong number. For anything depending on rendered geometry, use `browsebrowsebrowse` (`bbb`) — the sibling headless-Chrome CLI for this class of task.
-- **`innerText` is a performance cliff — reach for `textContent`.** `innerText` is layout-dependent by definition, so with no layout engine it degrades badly on a large subtree. Measured on a single 16KB element: `textContent` **1.5s** vs `innerText` **28s** (~18x); the same `innerText` call under `bbb` takes 2.4s. `textContent` is the right default — and needing real `innerText` semantics on a big element is itself a reason to use `bbb`.
-- **Present but inert — feature detection lies.** Several APIs exist, answer a `typeof` check, and then do nothing. Measured on a real page, contrasted against Chrome:
+- **No layout, and it fails silently rather than loudly.** happy-dom doesn't render, so `getBoundingClientRect()`, `offsetHeight` and `scrollHeight` return **`0`** — instantly, without throwing. Measured 2026-08-26 on a real page where Chrome reports `8670`, all three returned `0` in under 0.1ms; not re-run since. `getComputedStyle()` is unreliable in the same way: sometimes `''`, sometimes a default, rather than the real cascade. The danger is that these are *fast and confident*, so a layout-dependent assertion quietly passes or fails on a wrong number. For anything depending on rendered geometry, use `browsebrowsebrowse` (`bbb`) — the sibling headless-Chrome CLI for this class of task.
+- **`innerText` is a performance cliff — reach for `textContent`.** `innerText` is layout-dependent by definition, so with no layout engine happy-dom pays for it in software, and **the cost scales with the size of the subtree**. Measured **in-page** — timed inside the evaluated snippet, so process startup and the page fetch are excluded — on one **25,057-character** element, median of 3, 2026-09-01: `textContent` **~0.9ms** against `innerText` **~40.7s** (runs: 43.7s / 38.7s / 40.7s). That is a ratio of roughly **40,000x**, and it is not a typo. The same element under `bbb`, which has a real layout engine: `textContent` 0.2ms, `innerText` 1.2ms. End to end, an `innerText` call on an element that size is a `--timeout` you will have to wait out.
+
+  Two things this note used to get wrong, both worth knowing. It reported "~18x" from a wall-clock `textContent` of 1.5s against a wall-clock `innerText` of 28s — but the 1.5s was almost entirely process startup and page fetch, not `textContent`, so mixing the two scales understated the cliff by three orders of magnitude. And the 28s drifted upward on its own as the target page grew past the "16KB" it was first measured against. Scaling with element size is the durable finding here; any single number is an example of it, not a constant.
+
+  `textContent` is the right default — and needing real `innerText` semantics on a big element is itself a reason to use `bbb`.
+- **Present but inert — feature detection lies.** Several APIs exist, answer a `typeof` check, and then do nothing. Measured 2026-08-27 on a real page, contrasted against Chrome; not re-run since:
   - **`IntersectionObserver` is a `function` and never fires.** The most valuable one to know. Lazy-loaded images, infinite scroll and reveal-on-scroll never trigger, so that content is simply absent — no error, no warning, just a shorter list that looks like a correct answer.
   - `ResizeObserver` — identical: constructs, observes, never fires.
   - `canvas.getContext('2d')` returns `null`.

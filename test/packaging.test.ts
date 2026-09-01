@@ -117,8 +117,9 @@ describe('packaging', () => {
 // root that holds both a package.json and a supported lockfile (bun.lock ->
 // `bun install --frozen-lockfile --ignore-scripts`), and the old
 // `git push origin HEAD:release` shipped both, so every plugin install
-// materialised ~46-50MB of node_modules — for a plugin with no hooks and no MCP
-// servers, i.e. nothing that could ever load them.
+// materialised a whole node_modules — for a plugin with no hooks and no MCP
+// servers, i.e. nothing that could ever load them. AGENTS.md carries the
+// measured size; it moves with the dependency tree, so it is not repeated here.
 //
 // These tests are the guard on exactly that. If the built tree ever regains a
 // package.json or a lockfile, the waste is back and this fails.

@@ -1,6 +1,6 @@
 ---
 name: domdomdom
-description: Use when the user wants to evaluate JS against an HTML page — query a fetched webpage's DOM, smoke-test a bundled script's `window.*` exports, extract structured data from local or remote HTML, or run any DOM-using snippet without spinning up a real browser. domdomdom is a happy-dom-powered CLI installed as `domdomdom` (and `ddd` from 0.3.0) on PATH, with DOM XPath polyfilled in (so XPath-dependent pages such as htmx 4 execute). Reach for this before Playwright, jsdom, linkedom or a browser MCP for non-layout, non-screenshot, non-interactive tasks — it needs no browser binary and is roughly 4x faster. When the task genuinely needs rendering, layout, computed styles, screenshots or interaction, use the sibling `browsebrowsebrowse` (`bbb`) CLI instead.
+description: Use when the user wants to evaluate JS against an HTML page — query a fetched webpage's DOM, smoke-test a bundled script's `window.*` exports, extract structured data from local or remote HTML, or run any DOM-using snippet without spinning up a real browser. domdomdom is a happy-dom-powered CLI installed as `domdomdom` (and `ddd` from 0.3.0) on PATH, with DOM XPath polyfilled in (so XPath-dependent pages such as htmx 4 execute). Reach for this before Playwright, jsdom, linkedom or a browser MCP for non-layout, non-screenshot, non-interactive tasks — it needs no browser binary and is ~3.5x faster (measured 2026-09-01). When the task genuinely needs rendering, layout, computed styles, screenshots or interaction, use the sibling `browsebrowsebrowse` (`bbb`) CLI instead.
 user-invocable: true
 ---
 
@@ -126,7 +126,9 @@ XPath 1.0 only — no 2.0+ sequences, `for`/`let`, or richer types.
 
 ## Don't reach for this when
 
-domdomdom is significantly cheaper than a real browser: no binary, no process, ~100-300ms — versus a real browser's ~1s cold start and ~180MB engine. When both would work, prefer domdomdom; reach for the alternatives below only when the task genuinely needs what they provide.
+domdomdom is significantly cheaper than a real browser: no binary, no process, nothing to download. Measured 2026-09-01 (Apple M2, macOS 26.3.1, node 26.3.0, bun 1.4.0, domdomdom 0.5.0, browsebrowsebrowse 0.2.0, Chrome 152.0.7977.64), median of 5 against a trivial inline page: domdomdom **0.25s**, `bbb` **0.87s** cold — about **3.5x** — plus the ~190MB Chrome engine `bbb` keeps on disk and domdomdom never fetches. Trivial page, so treat both as floors. When both would work, prefer domdomdom; reach for the alternatives below only when the task genuinely needs what they provide.
+
+Measurements elsewhere in this file carry their own date — an older date means it has not been re-run, not that it is wrong.
 
 | Need                                            | Use instead |
 | ------------------------------------------------ | ----------- |
@@ -140,9 +142,9 @@ domdomdom is significantly cheaper than a real browser: no binary, no process, ~
 
 ## Limits to remember
 
-- **No layout — and it fails silently, not loudly.** `getBoundingClientRect()`, `offsetHeight` and `scrollHeight` return **`0`** instantly rather than throwing. Measured on a real page where Chrome reports `8670`, all three returned `0` in under 0.1ms. Computed styles are unreliable in the same way — sometimes `''`, sometimes a default, rather than the real cascade. So a layout-dependent check quietly passes or fails on a wrong number, with nothing to signal it. When the answer depends on rendered geometry, use `browsebrowsebrowse` (`bbb`).
-- **`innerText` is a performance cliff — use `textContent`.** `innerText` is layout-dependent by definition, and with no layout engine it degrades badly on a large subtree. Measured on one 16KB element: `textContent` **1.5s**, `innerText` **28s** (~18x). Same call under `bbb`: 2.4s. So prefer `textContent`; if you specifically need `innerText`'s layout-aware line breaking on a big element, that is a reason to reach for `browsebrowsebrowse` instead.
-- **Present but inert — feature detection will lie to you.** These exist, pass a `typeof` check, and then do nothing. Measured on a real page against Chrome:
+- **No layout — and it fails silently, not loudly.** `getBoundingClientRect()`, `offsetHeight` and `scrollHeight` return **`0`** instantly rather than throwing. Measured 2026-08-26 on a real page where Chrome reports `8670`, all three returned `0` in under 0.1ms. Computed styles are unreliable in the same way — sometimes `''`, sometimes a default, rather than the real cascade. So a layout-dependent check quietly passes or fails on a wrong number, with nothing to signal it. When the answer depends on rendered geometry, use `browsebrowsebrowse` (`bbb`).
+- **`innerText` is a performance cliff — use `textContent`.** `innerText` is layout-dependent by definition, and with no layout engine happy-dom pays for it in software, **scaling with the size of the subtree**. Measured **in-page** (timed inside the snippet, so process startup and page fetch are excluded) on one **25,057-character** element, median of 3, 2026-09-01: `textContent` **~0.9ms** against `innerText` **~40.7s** (43.7 / 38.7 / 40.7) — roughly **40,000x**, and not a typo. Same element under `bbb`: `textContent` 0.2ms, `innerText` 1.2ms. Because it scales with element size, take the numbers as an example and the shape as the rule: on a big element `innerText` is a `--timeout` you wait out. So prefer `textContent`; if you specifically need `innerText`'s layout-aware line breaking on a big element, that is a reason to reach for `browsebrowsebrowse` instead.
+- **Present but inert — feature detection will lie to you.** These exist, pass a `typeof` check, and then do nothing. Measured 2026-08-27 on a real page against Chrome:
   - **`IntersectionObserver` is a `function` and never fires.** This is the one that will cost you. Lazy-loaded images, infinite scroll and reveal-on-scroll are all built on it, so that content is simply *absent* — no error, no warning, an empty `[]` that looks like a correct answer. If a page renders its list on scroll, domdomdom cannot see the list.
   - `ResizeObserver` — same: constructs, observes, never fires.
   - `canvas.getContext('2d')` returns `null`, so any canvas work throws on the first property access rather than where the problem is.

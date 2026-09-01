@@ -42,6 +42,16 @@ and a stale Node floor.
   next reader has no way to tell a fact from a fact that expired. Same for
   anything time-relative: "unpublished as of 2026-08-26" beats "not yet
   published", because it makes staleness visible instead of invisible.
+
+  **The bench for this repo**, so no claim has to restate it: Apple M2, macOS
+  26.3.1, node 26.3.0, bun 1.4.0, deno 2.9.5, domdomdom 0.5.0,
+  browsebrowsebrowse 0.2.0, Chrome 152.0.7977.64. Figures below dated
+  **2026-09-01** were taken there. An older date on a figure means exactly that
+  — measured then, not re-run since — and is worth more than a fresh-looking
+  number nobody took. `README.md` and `skills/domdomdom/SKILL.md` ship without
+  this file (neither the npm tarball nor the plugin channel carries it), so they
+  each restate the bench once, at the top of their own cost section, and nowhere
+  else.
 - **Don't assert another project's status when you can link to it.** The "not
   yet published" claims were assertions about `browsebrowsebrowse` — a sibling
   repo one directory away, with a canonical source of truth (its `package.json`,
@@ -141,7 +151,9 @@ Invariants — these are the ways to get it wrong:
 
   The old channel was `git push origin HEAD:release`, so it carried the whole
   dev tree including `bun.lock`, and every single plugin install materialised
-  ~46-50MB of `node_modules`. Those deps exist so a plugin's hooks and MCP
+  a full `node_modules` — **46MB**, measured 2026-09-01 from this repo's own
+  lockfile. That figure tracks the dependency tree, so re-measure it rather
+  than treating it as a constant. Those deps exist so a plugin's hooks and MCP
   servers can load them. **This plugin ships skills only — no hooks, no MCP
   servers** — so not one byte of it was ever loadable. `.claude-plugin/` is the
   only file a plugin actually requires; nothing requires a `package.json`, and
@@ -153,8 +165,8 @@ Invariants — these are the ways to get it wrong:
   channel in a throwaway repo and asserts the exact path set plus the absence of
   a `package.json` and any lockfile. **Don't "restore" the dev tree** — the
   files it would add (`cli.ts`, `index.ts`, `test/`, `scripts/`, tsconfigs,
-  `AGENTS.md`) are read by nobody in the plugin cache and one of them costs 46MB
-  per user.
+  `AGENTS.md`) are read by nobody in the plugin cache and one of them — the
+  lockfile — costs every user the `node_modules` install measured above.
 - **The plugin channel and the npm channel ship different content, on
   purpose.** The plugin cache
   (`~/.claude/plugins/cache/scruffymongrel/domdomdom/<version>/`) is a git
@@ -321,8 +333,17 @@ only works if you change both.
   different answer.
 - **Bailing out mid-load floods `logs`.** Closing the browser while the
   document's subresources are in flight aborts every one of them, and each
-  abort arrives as a `console.error` — ~120 spurious lines on a real GitHub 404.
-  The `--fail` path snapshots `logs` *before* `safeClose()` for that reason.
+  abort arrives as a `console.error`. Those lines are artefacts of our own
+  bail-out, not of the page, so the `--fail` path snapshots `logs` *before*
+  `safeClose()`. That fix is unaffected by anything below and still correct.
+
+  **The mechanism is stable; the count is not.** How many lines you get scales
+  with how many subresources happen to be in flight at the moment the browser
+  closes, so it varies by page, by network and by run. One measured example, a
+  real GitHub 404 on 2026-09-01: **10 lines without `--fail`, 2 with**. This
+  file previously said "~120 spurious lines", unstamped, which was over by
+  more than 10x against that page — a good illustration of why a volatile
+  count belongs in an example rather than in the rule.
 - **`preventTimerLoops` is OFF, deliberately — don't reinstate it as
   "hardening".** happy-dom's guard fingerprints every `setTimeout` /
   `requestAnimationFrame` call by its `new Error().stack` string and, on the
@@ -343,8 +364,9 @@ only works if you change both.
   end of `evaluate()` uses the *host* `setTimeout`, so it fires regardless of
   what the page's own timers are doing: a tight self-rescheduling rAF chain and
   a permanent `setInterval` poller both return a clean `kind: "timeout"` just
-  past the budget (measured 2.12s and 2.14s against 2000ms). Tests in
-  `test/api.test.ts`'s `timers` block hold both ends of this down.
+  past the budget (measured 2026-08-27: 2.12s and 2.14s against 2000ms; not
+  re-run since). Tests in `test/api.test.ts`'s `timers` block hold both ends of
+  this down.
 
   happy-dom's finer-grained caps — `maxTimeout`, `maxIntervalTime`,
   `maxIntervalIterations` — are dedup-free and would not have this failure
@@ -360,12 +382,13 @@ only works if you change both.
   `abandoned` flag and the `clearTimeout`. **Don't remove either as dead code** —
   the CLI hides the bug because `runFromProcess()` calls `process.exit`, so it
   is invisible to every in-process test; a library caller leaks one poller per
-  timed-out call and the process never exits (measured: `evaluate()` returned,
-  the process was still alive at 2 minutes). Turning `preventTimerLoops` off
-  made this matter more, not less — never-idle pages now reach the timeout
-  instead of being silently stopped. `test/api.test.ts`'s "lets the process
-  exit" spawns a child precisely because in-process the runner keeps the loop
-  alive and a leak looks identical to a clean exit.
+  timed-out call and the process never exits (measured 2026-08-27:
+  `evaluate()` returned, the process was still alive at 2 minutes). Turning
+  `preventTimerLoops` off made this matter more, not less — never-idle pages
+  now reach the timeout instead of being silently stopped.
+  `test/api.test.ts`'s "lets the process exit" spawns a child precisely because
+  in-process the runner keeps the loop alive and a leak looks identical to a
+  clean exit.
 - `extractLocalScripts()` matches raw text, not a parsed DOM. It has to stay
   comment-aware in both directions: don't execute a commented-out
   `<script src>`, and don't treat `<!--` inside a script body or an attribute

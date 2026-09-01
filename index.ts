@@ -452,7 +452,8 @@ export async function evaluate(
       // Snapshot the logs *before* closing. Tearing the browser down while the
       // document's subresources are still in flight aborts every one of them,
       // and each abort arrives as a console error — artefacts of our own
-      // bail-out, not of the page. On a real 404 that was ~120 spurious lines.
+      // bail-out, not of the page. How many depends on what was in flight, so
+      // the measured example lives in AGENTS.md rather than here.
       const result: EvaluateResult = {
         ok: false,
         error: { kind: 'http', status: code, message: httpErrorMessage(code, opts.source as string) },

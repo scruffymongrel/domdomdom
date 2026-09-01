@@ -318,6 +318,14 @@ the other with no new rules. **Don't drift that surface without changing both.**
 toggles a happy-dom setting that has no Chrome analogue, so it is
 domdomdom-only, like `--html` and `--inject`. Don't "sync" it to `bbb`.
 
+`--bfcache` is domdomdom-only for the opposite reason — Chrome has the real
+thing. `bbb` could one day drive an actual back/forward navigation and read
+`notRestoredReasons`; a *simulation* of the restore would be strictly worse
+there, so don't port this one across. The division of labour is: domdomdom
+answers "does the page handle the restore", `bbb` is where "would this page be
+cached at all" would live if anyone needs it. Both docs are written to keep
+those apart — see the honest-labelling rule below.
+
 `isHttpFailure()` and `httpErrorMessage()` are duplicated verbatim in `bbb`'s
 `src/pure/http.ts`. A shared package between the two repos would be a third
 thing to version for two functions; the duplication is the cheaper trade, but it
@@ -389,6 +397,70 @@ only works if you change both.
   `test/api.test.ts`'s "lets the process exit" spawns a child precisely because
   in-process the runner keeps the loop alive and a leak looks identical to a
   clean exit.
+- **`PageTransitionEvent` is `Event`, and `pageshow` never fires — both
+  silently.** happy-dom sets `PageTransitionEvent = Event`
+  (`lib/window/BrowserWindow.js`, measured on happy-dom 20.9.0, 2026-09-01), so
+  `new PageTransitionEvent('pageshow', { persisted: true })` constructs happily
+  and `'persisted' in event` is `false`. And happy-dom exposes
+  `onpageshow`/`onpagehide` while dispatching neither. Together those made every
+  `if (event.persisted)` restore branch dead code *and* every page that sets
+  itself up inside a `pageshow` handler a no-op — with nothing thrown either
+  way. `installPageTransitionEvent()` and the post-load `pageshow` in
+  `evaluate()` fix both **unconditionally**, like the XPath polyfill: real
+  browsers do this, so a page that relies on it should just work. Tests assert
+  the fixed behaviour, so if happy-dom ever ships a genuine
+  `PageTransitionEvent` the guard hands over to it rather than shadowing it.
+- **happy-dom's `dispatchEvent` re-enters itself, so you cannot suppress events
+  by replacing it.** It walks the composed path and then calls
+  `event[PropertySymbol.target].dispatchEvent(event)` *again* to run the
+  listeners. A suppressor installed as an own `dispatchEvent` therefore eats the
+  inner call too — including events you dispatched yourself through a saved
+  reference to the original. This cost real debugging time on the socket
+  severing in `installBfcache()`: the injected close reported delivered, threw
+  nothing, and reached no listener, because `dispatchEvent`'s return value is a
+  boolean nobody reads. The fix is to suppress by **event identity** (a
+  `WeakSet` of events we injected) rather than by call, so the re-entrant pass
+  is transparent. Any future "swallow events from X" needs the same shape.
+- **`--bfcache` is lifecycle simulation, and the docs must not let that blur.**
+  It fires the choreography a restore performs on the live document; it does not
+  and cannot model eligibility, freeze semantics or timer suspension, because
+  those are browser behaviour rather than page behaviour and there is no session
+  history to navigate back through. The one thing it does that a real browser
+  cannot is *choose* whether a severed socket's close lands before `pageshow`,
+  after it, or never — which is the whole reason it exists, since that race is
+  where reconnect logic actually breaks and no browser lets you pick a side.
+  A passing run is **"lifecycle-verified under domdomdom"**, never "bfcache
+  eligible"; `test/packaging.test.ts` asserts both shipped docs still say so,
+  because an overclaim here is exactly the drift that costs someone a
+  production incident.
+
+  The severed close is deliberately dirty (`1006`, `wasClean: false`) — a
+  connection killed under a frozen page is an abnormal closure, and reconnect
+  logic keys off the code, so a polite `1000` would test the one shape that never
+  occurs. The `error` event ahead of it is opt-in (`{ error: true }`) rather than
+  a default, because whether a browser delivers one in this case is **not
+  measured** — an unmeasured default would be exactly the kind of invented
+  precision this file exists to prevent.
+- **A WebSocket still connecting when the browser closes kills the process, and
+  it is not ours.** happy-dom registers `once('error')` on the underlying `ws`
+  instance and nulls its own reference to it in `#close`, so a socket torn down
+  mid-connect can emit an error nobody is listening for — Node's EventEmitter
+  then throws `Unhandled error. (ErrorEvent)` and the process dies with a V8
+  internals stack trace, no `{ok:false}`, nothing an agent can parse. Reproduced
+  on **bare happy-dom 20.9.0, with no domdomdom in the picture** (2026-09-01):
+  two `new window.WebSocket(url)` and an immediate `browser.close()` prints
+  "closed cleanly" and *then* exits 1. A page that waits for its sockets to
+  settle first does not hit it.
+
+  Bisected against `--bfcache` specifically, because severing looked like the
+  obvious culprit and isn't: sever-then-reconnect exits 0, while two plain
+  sockets with the flag off exit 1. Worth knowing anyway, because `--bfcache`
+  exists to test reconnect logic and so invites exactly the pages that trigger
+  it. **Unfixed, deliberately** — the fix means reaching for happy-dom's
+  internal `PropertySymbol.webSocket` to attach a permanent error listener, and
+  patching a third-party class unconditionally is a bigger commitment than the
+  bug currently justifies. Re-measure against a newer happy-dom before assuming
+  it is still there.
 - `extractLocalScripts()` matches raw text, not a parsed DOM. It has to stay
   comment-aware in both directions: don't execute a commented-out
   `<script src>`, and don't treat `<!--` inside a script body or an attribute

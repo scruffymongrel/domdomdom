@@ -108,7 +108,7 @@ echo 'return await fetch("/api/x").then(r => r.json())' \
 
 ## Useful flags
 
-`--fail` (non-2xx is an error, exit 4) &middot; `--inject <f>` (preload, repeatable) &middot; `--script <f>` (code from file) &middot; `--module` (ESM) &middot; `--user-agent <s>` &middot; `--no-console` (drop logs) &middot; `--viewport WxH` &middot; `--prevent-timer-loops` (see Timers). Run `domdomdom --help` for the full list.
+`--fail` (non-2xx is an error, exit 4) &middot; `--inject <f>` (preload, repeatable) &middot; `--script <f>` (code from file) &middot; `--module` (ESM) &middot; `--user-agent <s>` &middot; `--no-console` (drop logs) &middot; `--viewport WxH` &middot; `--prevent-timer-loops` (see Timers) &middot; `--bfcache` (see below). Run `domdomdom --help` for the full list.
 
 ## XPath works (no flag)
 
@@ -123,6 +123,57 @@ echo 'return document.evaluate("//td[2]", document, null, XPathResult.FIRST_ORDE
 ```
 
 XPath 1.0 only — no 2.0+ sequences, `for`/`let`, or richer types.
+
+## Back/forward cache (`--bfcache`)
+
+Use when the task is "does this page survive a bfcache restore" — a reconnecting
+socket, a stale-state guard, anything gated on `pageshow.persisted`.
+
+Two fixes apply on **every** run, no flag needed, because they are happy-dom bugs:
+`PageTransitionEvent` is aliased to `Event` upstream (so `persisted` was silently
+dropped and every `if (e.persisted)` branch was dead code), and `pageshow` was
+never dispatched at all (so a page that sets itself up in a `pageshow` handler
+never set up). domdomdom installs a real `PageTransitionEvent` and fires
+`pageshow` with `persisted: false` after load, as a browser does.
+
+`--bfcache` adds `window.__bfcache` — `restore()`, `hide()`, `show()`, `sever()`,
+`deliverCloses()` — which drives the live document through a restore.
+
+```sh
+domdomdom --bfcache --json ./app.html <<'JS'
+const seen = []
+addEventListener('pageshow', e => seen.push(e.persisted))
+const report = await __bfcache.restore()
+return { seen, report }   // seen: [false, true]; report: { severed, delivered }
+JS
+```
+
+**The ordering knob is the reason to reach for this.** A frozen page's socket
+dies, but whether its `close` arrives before `pageshow`, after it, or never is
+not something a real browser lets you choose — so a reconnect bug that hinges on
+it passes every ordinary test:
+
+```js
+await __bfcache.restore()                       // close, then pageshow (default)
+await __bfcache.restore({ sockets: 'after' })   // pageshow, then the stale close
+await __bfcache.restore({ sockets: 'never' })   // pageshow, close never arrives
+await __bfcache.restore({ sockets: 'keep' })    // leave the socket alone
+```
+
+Severed sockets get the dirty shape a real one has — code **1006**,
+`wasClean: false` — never a polite `1000`; `readyState` reads `3` and `send()` is
+discarded rather than throwing. `restore()` returns `{ severed, delivered }`;
+assert `severed` rather than trusting it, because a page that installs its own
+`window.WebSocket` mock opts itself out and reports `0`. `{ sockets: 'never' }`
+plus a later `__bfcache.deliverCloses()` puts the timing entirely in your hands.
+`{ error: true }` fires `error` ahead of each close (opt-in: whether a real
+browser does so here is unmeasured).
+
+**Report results honestly.** This is lifecycle only — eligibility, true freeze
+semantics and timer suspension are browser behaviour and are deliberately not
+modelled. Say **"lifecycle-verified under domdomdom"**, never "bfcache eligible";
+only a real browser answers the second, via `notRestoredReasons`. If that is the
+question, it is a `browsebrowsebrowse` (`bbb`) job.
 
 ## Don't reach for this when
 

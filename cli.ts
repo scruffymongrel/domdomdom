@@ -29,6 +29,7 @@ Other options:
   --timeout <ms>            time limit; 0 disables; default 5000
   --prevent-timer-loops     drop timers rescheduled from the same call site
                             (happy-dom's guard; off by default, see below)
+  --bfcache                 install window.__bfcache (see below)
   --fail                    treat a non-2xx page as an error (like curl --fail)
   --no-console              drop console.* output instead of capturing it
   --json                    emit a single JSON line: { ok, result?, error?, logs, status }
@@ -54,6 +55,25 @@ Timers:
   silently drops repeat timers from it — that also kills ordinary sequential
   awaited timers, so it is opt-in.
 
+Back/forward cache (--bfcache):
+  Installs window.__bfcache on the page, which drives the live document through
+  a bfcache restore. pageshow/pagehide carry a real .persisted (happy-dom
+  aliases PageTransitionEvent to Event, silently dropping it).
+
+    await __bfcache.restore()                        // the whole round trip
+    await __bfcache.restore({ sockets: 'after' })    // close lands AFTER pageshow
+    await __bfcache.restore({ sockets: 'never' })    // close never arrives
+    __bfcache.hide() / .show() / .sever() / .deliverCloses()
+
+  Severed WebSockets get the dirty shape a frozen page's connection really has
+  -- code 1006, wasClean false -- not a polite 1000. Ordering the close against
+  pageshow is the point: no real browser lets you choose it. Pass
+  { error: true } to fire 'error' ahead of each close.
+
+  Lifecycle only. Whether a browser would have cached the page at all is NOT
+  modelled and cannot be; report results as "lifecycle-verified under
+  domdomdom", never as "bfcache eligible".
+
 Limits:
   Synchronous infinite loops in user code block the timeout (host event loop
   shared with the page). Wrap in shell timeout for hard cap: timeout 5s domdomdom ...
@@ -69,6 +89,7 @@ interface Args {
   viewport: { width: number; height: number } | undefined
   timeout: number
   preventTimerLoops: boolean
+  bfcache: boolean
   quietConsole: boolean
   fail: boolean
   json: boolean
@@ -133,6 +154,7 @@ function parseCli(argv: string[]): Args {
       viewport: { type: 'string' },
       timeout: { type: 'string' },
       'prevent-timer-loops': { type: 'boolean' },
+      bfcache: { type: 'boolean' },
       'no-console': { type: 'boolean' },
       fail: { type: 'boolean' },
       json: { type: 'boolean' },
@@ -148,6 +170,7 @@ function parseCli(argv: string[]): Args {
     viewport: values.viewport ? parseViewport(values.viewport) : undefined,
     timeout: values.timeout != null ? Number(values.timeout) : 5000,
     preventTimerLoops: !!values['prevent-timer-loops'],
+    bfcache: !!values.bfcache,
     quietConsole: !!values['no-console'],
     fail: !!values.fail,
     json: !!values.json,
@@ -268,6 +291,7 @@ export async function runCli(io: CliIO): Promise<number> {
     quietConsole: args.quietConsole,
     failOnHttpError: args.fail,
     preventTimerLoops: args.preventTimerLoops,
+    bfcache: args.bfcache,
   }
   if (args.html != null) opts.html = args.html
   else if (args.positional != null) opts.source = args.positional

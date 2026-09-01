@@ -104,6 +104,18 @@ describe('packaging', () => {
     expect(skill).toContain('npm i -g domdomdom@latest')
   })
 
+  // --bfcache simulates the restore lifecycle and cannot model eligibility.
+  // An overclaim in the shipped docs is the drift that costs someone a
+  // production incident, so both of them have to keep saying which is which.
+  test('the shipped docs keep bfcache claims honest', () => {
+    for (const rel of ['skills/domdomdom/SKILL.md', 'README.md']) {
+      const doc = readFileSync(resolve(root, rel), 'utf8')
+      expect(doc).toContain('--bfcache')
+      expect(doc).toContain('lifecycle-verified under domdomdom')
+      expect(doc).toContain('notRestoredReasons')
+    }
+  })
+
   test('the README documents the plugin/CLI upgrade dance', () => {
     const readme = readFileSync(resolve(root, 'README.md'), 'utf8')
     expect(readme).toContain('/plugin update')

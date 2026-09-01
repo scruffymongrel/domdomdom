@@ -59,6 +59,18 @@ export interface EvaluateOptions {
    * object to raise it per timer kind.
    */
   preventTimerLoops?: boolean | TimerLoopLimits
+  /**
+   * Install `window.__bfcache`, a helper that puts the live page through the
+   * back/forward-cache restore choreography — `pagehide`/`pageshow` with
+   * `persisted: true`, `freeze`/`resume`, visibility — and can sever the
+   * page's WebSockets with a dirty 1006 close delivered before `pageshow`,
+   * after it, or never. Off by default: it is not a browser API, and a page
+   * ddd loads should look like a page rather than like a page under test.
+   *
+   * This is lifecycle only. Whether a real browser would have cached the page
+   * at all is not modelled, and cannot be — see the note on `installBfcache`.
+   */
+  bfcache?: boolean
 }
 
 export type EvaluateError =
@@ -307,6 +319,230 @@ function installXPath(window: object): void {
   }
 }
 
+interface PageTransitionEventInit {
+  persisted?: boolean
+}
+
+type EventConstructor = new (type: string, init?: object) => object
+
+// happy-dom aliases `PageTransitionEvent` straight to `Event`
+// (`lib/window/BrowserWindow.js`: `PageTransitionEvent = Event`). So the
+// constructor exists, `new PageTransitionEvent('pageshow', { persisted: true })`
+// succeeds, and `persisted` is silently dropped — `'persisted' in event` is
+// false. Every `if (event.persisted)` restore branch in a page is therefore
+// dead code, with nothing thrown to notice it by. Same failure class as the
+// missing XPath API above: the surface is present and it lies.
+//
+// Measured against happy-dom 20.9.0 on 2026-09-01, and asserted by a test —
+// the guard means a happy-dom that ships a real one wins instead of being
+// quietly shadowed.
+function installPageTransitionEvent(window: object): void {
+  const win = window as Record<string, unknown>
+  const BaseEvent = win.Event as EventConstructor | undefined
+  if (!BaseEvent) return
+  if (win.PageTransitionEvent != null && win.PageTransitionEvent !== BaseEvent) return
+  // Extends the *window's* Event, so `instanceof Event` still holds for page code.
+  class PageTransitionEvent extends BaseEvent {
+    readonly persisted: boolean
+    constructor(type: string, init: PageTransitionEventInit = {}) {
+      super(type, init)
+      this.persisted = init.persisted === true
+    }
+  }
+  win.PageTransitionEvent = PageTransitionEvent
+}
+
+/** WebSocket readyState values, by name rather than by magic number. */
+const WS_CONNECTING = 0
+const WS_OPEN = 1
+const WS_CLOSED = 3
+
+/** Options for `window.__bfcache.restore()` / `.deliverCloses()`. */
+interface BfcacheRestoreOptions {
+  /**
+   * Where the severed sockets' close events land relative to `pageshow`:
+   * `before` (default), `after` (a macrotask later), `never`, or `keep` to
+   * leave sockets untouched entirely.
+   */
+  sockets?: 'before' | 'after' | 'never' | 'keep'
+  /** Also fire `error` ahead of each close. Off by default — see below. */
+  error?: boolean
+}
+
+interface SeverableSocket {
+  readyState: number
+  send(data?: unknown): void
+  dispatchEvent(event: object): boolean
+  close(code?: number, reason?: string): void
+}
+
+// bfcache proper is out of reach and stays that way: there is no session
+// history to navigate back through, and ddd evaluates one page once. What is
+// reachable is the half a page can actually observe. bfcache's defining
+// property is that the *same document survives* — no re-navigation, no
+// re-parse, just lifecycle events describing what happened around it — so a
+// live page receiving the right choreography is a closer model of a restore
+// than emulating history would be. Testing a different page's restore is
+// covered by loading that page fresh and firing the events, because that is
+// the DOM bfcache would have handed back anyway.
+//
+// Deliberately NOT emulated: eligibility (whether a real browser would have
+// cached this page at all), true freeze semantics, timer suspension. Those are
+// browser behaviour rather than page behaviour, and faking them would be false
+// precision. A page that passes here is lifecycle-verified, not bfcache
+// eligible; only a real browser can tell you the second, so say the first.
+//
+// Why sockets get their own choreography: the interesting bug a restore
+// exposes is not the events but the race between them and the death of the
+// connection the page was holding. The socket dies while the page is frozen,
+// yet whether its close is delivered before `pageshow`, after it, or never is
+// not something a real browser lets you choose — so reconnect logic that gets
+// it wrong fails in production and passes in every test. All three orderings
+// are selectable here, which is the one thing this fake can do that the real
+// thing cannot.
+//
+// The close is dirty on purpose. A connection torn down under a frozen page is
+// an abnormal closure — code 1006, `wasClean: false`, empty reason — never the
+// polite 1000 that a page-initiated `close()` produces. Reconnect logic almost
+// always keys off the code, so severing with a clean close would test the one
+// shape that never occurs.
+//
+// Opt-in rather than always installed: `window.__bfcache` is not a browser
+// API, and every page ddd loads should look like a page, not like a page under
+// test.
+function installBfcache(window: object): void {
+  const win = window as Record<string, never> & {
+    document: { dispatchEvent(event: object): boolean }
+    dispatchEvent(event: object): boolean
+    setTimeout(fn: () => void, ms: number): unknown
+    Event: EventConstructor
+    CloseEvent: EventConstructor
+    PageTransitionEvent: EventConstructor
+    WebSocket?: unknown
+    __bfcache?: unknown
+  }
+  const doc = win.document
+  const tracked: SeverableSocket[] = []
+  const pending: SeverableSocket[] = []
+  const nativeDispatch = new WeakMap<SeverableSocket, (event: object) => boolean>()
+  // Events we injected ourselves, and which a severed socket must therefore
+  // still deliver. Identity rather than a boolean flag because happy-dom's
+  // dispatchEvent is two-phase: it walks the composed path and then re-enters
+  // through `target.dispatchEvent(event)` to actually run the listeners, so a
+  // suppressor that swallowed everything would eat our own close on the way
+  // back in — silently, since dispatchEvent returns a boolean nobody reads.
+  const injected = new WeakSet<object>()
+
+  const NativeWebSocket = win.WebSocket
+  if (typeof NativeWebSocket === 'function') {
+    // A Proxy rather than a subclass: statics, `.prototype` and `instanceof`
+    // all keep working, so the page sees the class it would have had. Every
+    // socket the page opens is caught, because setupWindow() runs before any
+    // page script — a page that replaces `window.WebSocket` with its own mock
+    // opts itself out, and `sever()` then honestly reports 0.
+    win.WebSocket = new Proxy(NativeWebSocket as new (...args: never[]) => SeverableSocket, {
+      construct(target, args, newTarget): object {
+        const socket = Reflect.construct(target, args, newTarget) as SeverableSocket
+        tracked.push(socket)
+        return socket
+      },
+    }) as never
+  }
+
+  // `visibilityState` and `hidden` are separate getters in happy-dom — moving
+  // one without the other leaves the page reading a contradiction.
+  const setVisibility = (state: 'hidden' | 'visible'): void => {
+    Object.defineProperty(doc, 'visibilityState', { value: state, configurable: true })
+    Object.defineProperty(doc, 'hidden', { value: state === 'hidden', configurable: true })
+    doc.dispatchEvent(new win.Event('visibilitychange', { bubbles: true }))
+  }
+
+  const sever = (): number => {
+    let severed = 0
+    for (const socket of tracked) {
+      const state = socket.readyState
+      if (state !== WS_CONNECTING && state !== WS_OPEN) continue
+      const dispatch = socket.dispatchEvent.bind(socket)
+      nativeDispatch.set(socket, dispatch)
+      // Anything the real transport says from here on is an artefact of our own
+      // teardown, not something a frozen page would ever have seen.
+      socket.dispatchEvent = (event: object): boolean => (injected.has(event) ? dispatch(event) : true)
+      // Close the transport for real before shadowing readyState, because
+      // happy-dom's close() reads readyState to decide what to tear down. An
+      // abandoned socket would otherwise hold the host event loop open.
+      socket.close()
+      // readyState is a getter over a private field, so an own property
+      // shadowing it is the only way to correct it from out here.
+      Object.defineProperty(socket, 'readyState', { value: WS_CLOSED, configurable: true })
+      // Per spec, send() on a closed socket discards the data — it does not throw.
+      socket.send = (): void => {}
+      pending.push(socket)
+      severed++
+    }
+    tracked.length = 0
+    return severed
+  }
+
+  // `error` ahead of `close` is the full abnormal-closure shape the WebSocket
+  // spec describes for a failed connection, but whether a browser delivers one
+  // for a socket killed under bfcache is not something this repo has measured.
+  // So it is opt-in rather than a default that would be an unmeasured guess.
+  const deliverCloses = (withError: boolean): number => {
+    let delivered = 0
+    for (const socket of pending.splice(0)) {
+      const dispatch = nativeDispatch.get(socket)!
+      const fire = (event: object): void => {
+        injected.add(event)
+        dispatch(event)
+      }
+      if (withError) fire(new win.Event('error'))
+      fire(new win.CloseEvent('close', { code: 1006, reason: '', wasClean: false }))
+      delivered++
+    }
+    return delivered
+  }
+
+  const hide = (): void => {
+    setVisibility('hidden')
+    win.dispatchEvent(new win.PageTransitionEvent('pagehide', { persisted: true }))
+    doc.dispatchEvent(new win.Event('freeze'))
+  }
+
+  const show = (): void => {
+    doc.dispatchEvent(new win.Event('resume'))
+    win.dispatchEvent(new win.PageTransitionEvent('pageshow', { persisted: true }))
+    setVisibility('visible')
+  }
+
+  const restore = async (options: BfcacheRestoreOptions = {}): Promise<object> => {
+    const mode = options.sockets ?? 'before'
+    const withError = options.error === true
+    hide()
+    const severed = mode === 'keep' ? 0 : sever()
+    let delivered = mode === 'before' ? deliverCloses(withError) : 0
+    show()
+    if (mode === 'after') {
+      // A macrotask, so the page's own pageshow handler has finished and any
+      // socket it opened in response already exists — which is the entire
+      // point of this mode. Awaiting restore() therefore means the stale close
+      // has landed too, in that order, with no timing left to the caller.
+      await new Promise(resolve => win.setTimeout(resolve as () => void, 0))
+      delivered += deliverCloses(withError)
+    }
+    return { severed, delivered }
+  }
+
+  win.__bfcache = {
+    restore,
+    hide,
+    show,
+    sever,
+    // For `sockets: 'never'` plus a moment of the caller's own choosing.
+    deliverCloses: (options: BfcacheRestoreOptions = {}): number =>
+      deliverCloses(options.error === true),
+  }
+}
+
 function fmtArg(a: unknown): string {
   if (typeof a === 'string') return a
   try {
@@ -385,6 +621,8 @@ export async function evaluate(
     patchBuiltins(w)
     captureConsole(w as never, logs, !!opts.quietConsole)
     installXPath(w)
+    installPageTransitionEvent(w)
+    if (opts.bfcache) installBfcache(w)
   }
 
   const settings: Record<string, unknown> = {
@@ -470,6 +708,21 @@ export async function evaluate(
     }
 
     await page.waitUntilComplete()
+
+    // Browsers fire `pageshow` after load on *every* navigation, cached or
+    // not; happy-dom fires neither pageshow nor pagehide, only exposing the
+    // `onpageshow`/`onpagehide` handler properties. So a page that does its
+    // setup inside a pageshow handler silently never sets up. `persisted` is
+    // false here — this is a fresh load, not a restore.
+    //
+    // Safe to fire from inside this try: happy-dom routes a throwing listener
+    // to its own error handling (console.error), so a broken page handler
+    // cannot turn into a ddd setup error.
+    const loaded = page.mainFrame.window as unknown as {
+      dispatchEvent(event: object): boolean
+      PageTransitionEvent: new (type: string, init?: object) => object
+    }
+    loaded.dispatchEvent(new loaded.PageTransitionEvent('pageshow', { persisted: false }))
   } catch (e) {
     await safeClose(browser)
     return setupError(e, logs, status)

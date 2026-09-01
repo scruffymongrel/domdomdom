@@ -102,6 +102,7 @@ domdomdom [options] [URL_OR_PATH]
 | `--viewport WxH` | override page viewport (e.g. `1024x768`)                    |
 | `--timeout <ms>` | time limit; `0` disables; default `5000`                    |
 | `--prevent-timer-loops` | opt into happy-dom's timer-loop guard; off by default (see [Timers](#timers)) |
+| `--bfcache`      | install `window.__bfcache`, the back/forward-cache lifecycle helper (see [Back/forward cache](#backforward-cache)) |
 | `--fail`         | treat a non-2xx page as an error, like `curl --fail`        |
 | `--no-console`   | drop `console.*` output instead of capturing it             |
 | `--json`         | emit one JSON line: `{ ok, result?, error?, logs, status }` |
@@ -183,6 +184,7 @@ interface EvaluateOptions {
   failOnHttpError?: boolean // non-2xx becomes an 'http' error; code never runs
   preventTimerLoops?: boolean | { timeout?: number; requestAnimationFrame?: number }
                           // happy-dom's timer-loop guard; off by default
+  bfcache?: boolean       // install window.__bfcache; off by default
 }
 
 // `status` is the main document's final HTTP status after redirects, and null
@@ -339,6 +341,93 @@ echo 'return document.evaluate("//td[2]", document, null, XPathResult.FIRST_ORDE
 ```
 
 Covers DOM XPath 1.0 (`document.evaluate`, `createExpression`, `createNSResolver`, the `XPathEvaluator` constructor, `XPathResult` type constants). No XPath 2.0+ (sequences, `for`/`let`, richer type system) — wicked-good-xpath doesn't implement it and nothing found in htmx 4 needs it.
+
+## Back/forward cache
+
+Two of these apply to **every** run, with or without a flag, because they are
+happy-dom bugs rather than features:
+
+- **`PageTransitionEvent` was literally `Event`.** happy-dom aliases the two, so
+  `new PageTransitionEvent('pageshow', { persisted: true })` succeeded and threw
+  `persisted` away — `'persisted' in event` came back `false`. Every
+  `if (event.persisted)` restore branch in a page was dead code, with nothing
+  thrown to notice it by. domdomdom installs a real one.
+- **`pageshow` never fired.** happy-dom exposes `onpageshow` / `onpagehide` and
+  dispatches neither, so a page whose setup lives in a `pageshow` handler never
+  set up. domdomdom fires `pageshow` with `persisted: false` after load, which is
+  what a browser does on every navigation, cached or not.
+
+`--bfcache` adds `window.__bfcache`, which drives the **live** page through a
+restore. It is opt-in because it is not a browser API, and a page domdomdom
+loads should look like a page rather than like a page under test.
+
+```sh
+domdomdom --bfcache --json ./app.html <<'JS'
+const seen = []
+addEventListener('pageshow', e => seen.push(e.persisted))
+await __bfcache.restore()
+return seen                       // [false, true] — the load, then the restore
+JS
+```
+
+| Member | Effect |
+| ------ | ------ |
+| `await restore(opts?)` | the whole round trip; resolves once every event it will fire has fired |
+| `hide()` | `visibilitychange`→hidden, `pagehide` (`persisted: true`), `freeze` |
+| `show()` | `resume`, `pageshow` (`persisted: true`), `visibilitychange`→visible |
+| `sever()` | kill the page's WebSockets now; returns how many |
+| `deliverCloses(opts?)` | deliver the withheld close events; returns how many |
+
+### Sockets, and why the ordering is the point
+
+The interesting bug a restore exposes is not the events. It is the race between
+them and the death of the connection the page was holding. The socket dies while
+the page is frozen, but whether its `close` is delivered **before** `pageshow`,
+**after** it, or **never** is not something a real browser lets you choose — so
+reconnect logic that gets it wrong fails in production and passes in every test.
+`restore()` lets you pick:
+
+```js
+await __bfcache.restore()                       // close, then pageshow (default)
+await __bfcache.restore({ sockets: 'after' })   // pageshow, then the stale close
+await __bfcache.restore({ sockets: 'never' })   // pageshow, close never arrives
+await __bfcache.restore({ sockets: 'keep' })    // leave the socket alone
+```
+
+`{ sockets: 'never' }` plus a later `deliverCloses()` puts the moment entirely in
+your hands. `restore()` returns `{ severed, delivered }` so a test can assert it
+severed something rather than silently severing nothing — a page that installs
+its own `window.WebSocket` mock opts itself out, and `severed: 0` is how you see
+that.
+
+The close is **dirty on purpose**: code `1006`, `wasClean: false`, empty reason.
+A connection torn down under a frozen page is an abnormal closure, never the
+polite `1000` that a page-initiated `close()` produces, and reconnect logic
+almost always keys off the code — so severing cleanly would test the one shape
+that never occurs. A severed socket also reads `readyState === 3`, discards
+`send()` per spec rather than throwing, and delivers nothing further from its
+real transport.
+
+Pass `{ error: true }` to fire `error` ahead of each close. That is the full
+abnormal-closure shape the WebSocket spec describes, but whether a browser
+actually delivers one for a socket killed under bfcache is not something this
+repo has measured — hence opt-in rather than a default that would be a guess.
+
+### What this is not
+
+This is **lifecycle only**. bfcache proper is out of reach and stays that way:
+there is no session history to navigate back through, and domdomdom evaluates one
+page once. What is reachable is the half a page can observe — and bfcache's
+defining property is that the *same document survives*, so a live page receiving
+the right choreography is a closer model of a restore than emulating history
+would be.
+
+Deliberately **not** modelled: eligibility (whether a real browser would have
+cached the page at all), true freeze semantics, timer suspension. Those are
+browser behaviour rather than page behaviour, and faking them would be false
+precision. Report a passing run as **"lifecycle-verified under domdomdom"**,
+never as "bfcache eligible" — only a real browser can tell you the second, via
+`notRestoredReasons`.
 
 ## Development
 

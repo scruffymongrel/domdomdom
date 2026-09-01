@@ -141,12 +141,15 @@ never set up). domdomdom installs a real `PageTransitionEvent` and fires
 
 ```sh
 domdomdom --bfcache --json ./app.html <<'JS'
-const seen = []
-addEventListener('pageshow', e => seen.push(e.persisted))
 const report = await __bfcache.restore()
-return { seen, report }   // seen: [false, true]; report: { severed, delivered }
+return { seen: window.seen, report }   // report: { severed, delivered }
 JS
 ```
+
+**Register `pageshow` listeners in the page, not in your stdin code.** Your code
+runs *after* load, so the load's `pageshow` has already fired — a listener added
+there sees only the restore (`[true]`, never `[false, true]`). Use the page's own
+script or `--inject` to catch both.
 
 **The ordering knob is the reason to reach for this.** A frozen page's socket
 dies, but whether its `close` arrives before `pageshow`, after it, or never is

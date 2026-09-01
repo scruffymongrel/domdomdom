@@ -362,13 +362,18 @@ restore. It is opt-in because it is not a browser API, and a page domdomdom
 loads should look like a page rather than like a page under test.
 
 ```sh
-domdomdom --bfcache --json ./app.html <<'JS'
-const seen = []
-addEventListener('pageshow', e => seen.push(e.persisted))
+# The page's own script sees both pageshows: the load, then the restore.
+domdomdom --bfcache --json \
+  --html '<script>window.seen=[];addEventListener("pageshow",e=>seen.push(e.persisted))</script>' <<'JS'
 await __bfcache.restore()
-return seen                       // [false, true] — the load, then the restore
+return window.seen                // [false, true]
 JS
 ```
+
+Note *where* that listener is registered. Your stdin code runs after the page has
+loaded, so the load's `pageshow` has already fired by then — a listener added
+there only ever sees the restore (`[true]`). To observe the load one, register
+from inside the page or via `--inject`, the same as in a browser.
 
 | Member | Effect |
 | ------ | ------ |

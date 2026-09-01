@@ -76,6 +76,30 @@ describe('initial pageshow (applies to every run)', () => {
     expect(r.ok && r.result).toEqual([false])
   })
 
+  // The documented trap: user code runs *after* load, so the load's pageshow is
+  // already gone by then. Both shipped docs show the listener registered inside
+  // the page for exactly this reason, and an example that promised
+  // [false, true] from user code shipped once before being caught by running
+  // the published package.
+  test('a listener registered in user code sees only the restore', async () => {
+    const r = await evaluate(
+      `const seen = []
+       addEventListener('pageshow', e => seen.push(e.persisted))
+       await __bfcache.restore()
+       return seen`,
+      { bfcache: true },
+    )
+    expect(r.ok && r.result).toEqual([true])
+  })
+
+  test('a listener registered by the page sees the load and the restore', async () => {
+    const r = await evaluate('await __bfcache.restore(); return window.seen', {
+      bfcache: true,
+      html: `<script>window.seen = []; addEventListener('pageshow', e => seen.push(e.persisted))</script>`,
+    })
+    expect(r.ok && r.result).toEqual([false, true])
+  })
+
   test('a throwing pageshow handler is reported, not turned into a setup error', async () => {
     const r = await evaluate('return 1', {
       html: `<script>addEventListener('pageshow', () => { throw new Error('nope') })</script>`,

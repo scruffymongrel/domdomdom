@@ -211,6 +211,43 @@ Measurements elsewhere in this file carry their own date — an older date means
 - **No bare specifiers** in `<script type="module">`. Relative imports work.
 - **Stack traces** point at evaluated-script offsets, not the user's `.ts` source.
 
+## Restrictions ddd doesn't enforce
+
+Everything above is a *missing capability* — a feature doesn't work, and you
+get an empty or wrong result that's at least visible. This is a different
+shape: **the platform's reject-on-malformed-input guard is missing, so a test
+whose only job is proving something gets refused instead reports success.**
+Nothing is empty, nothing throws, nothing looks wrong — the danger is that it
+looks exactly like a pass.
+
+domdomdom takes `Response`, `Request` and `Headers` from happy-dom wholesale
+and adds no validation of its own; happy-dom implements the happy-path shape
+of the Fetch spec and skips its "MUST throw" branches. Reported by a consumer
+and reproduced here 2026-09-09 on domdomdom 0.6.1 / happy-dom 20.9.0, with
+`browsebrowsebrowse` (`bbb`, real Chrome) as reference:
+
+| Restriction | domdomdom | Real Chrome (`bbb`) |
+| --- | --- | --- |
+| `Response` with a null-body status (101/204/205/304) and a body | silently constructs it | throws `TypeError` (`RangeError` for 101 specifically, which fails the status-range check first) |
+| `Response` status outside `[200,599]` | silently constructs it | throws `RangeError` |
+| `Headers.set()` with a syntactically invalid name (e.g. one containing a space) | silently stores it | throws `TypeError` |
+
+```sh
+echo 'try { new Response("x", {status:204}); return "NO THROW" } catch(e) { return "THREW: " + e.message }' | domdomdom --json
+# {"ok":true,"result":"NO THROW", ...}   — real Chrome throws "Response with null body status cannot have body"
+```
+
+Pinned in `test/fetch-restrictions.test.ts` so a happy-dom fix surfaces as a
+failing test rather than a stale doc. Not exhaustive — treat the table as a
+sample of the class ("these classes implement construction, not rejection"),
+not a complete list; GET/HEAD `Request` + body is one restriction that *is*
+enforced on both sides today.
+
+**If a test's whole job is proving a platform *refuses* something, run it
+under `browsebrowsebrowse` (`bbb`), not domdomdom.** Reserve domdomdom for the
+fast, capability-shaped assertions — does this render/return/compute the right
+thing — and `bbb` for anything a spec says "MUST throw" or "MUST NOT permit."
+
 ## When things go wrong
 
 - **`ok: true` but `result: undefined`** — user's code didn't return. In multi-statement code, `return` is required.

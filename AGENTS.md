@@ -331,6 +331,26 @@ those apart — see the honest-labelling rule below.
 thing to version for two functions; the duplication is the cheaper trade, but it
 only works if you change both.
 
+**A Fetch-spec restriction that must throw is a `bbb` assertion, not a `ddd`
+one — same division of labour as `--bfcache` above.** ddd takes `Response`,
+`Request` and `Headers` from happy-dom wholesale and adds no validation of its
+own; happy-dom implements the happy-path shape of the Fetch types and skips
+the reject-on-malformed-input branches (confirmed by reading
+`node_modules/happy-dom/src/fetch/{Response,Headers}.ts`, happy-dom 20.9.0) —
+`new Response('x', {status:204})` doesn't throw under ddd, where a real
+browser throws `TypeError: Response with null body status cannot have body`.
+Reported by a consumer against ddd 0.6.1 / happy-dom 20.9.0, 2026-09-09, and
+reproduced on this checkout the same day. **Don't shim this into ddd's
+`setupWindow()`** — unlike the XPath and `PageTransitionEvent` patches, which
+restore behavior a page can already rely on in every real browser, "make
+Fetch construction spec-compliant" has no natural stopping point once started
+(the reporter's own framing: "why not all of them"), and it duplicates work
+`bbb` already gets right for free by being real Chrome. Pinned in
+`test/fetch-restrictions.test.ts` and documented in the skill's "Restrictions
+ddd doesn't enforce" so a happy-dom fix shows up as a failing test rather than
+a silently-stale doc. If this ever gets fixed upstream, it's a happy-dom
+version bump, not a ddd patch.
+
 ## Things that bite in this codebase
 
 - **`page.goto()`'s return value is the only honest source of the HTTP status.**
